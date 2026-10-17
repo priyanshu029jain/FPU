@@ -15,3 +15,7 @@ synth/
 script/*_mapped.v
 script/*_report*.txt
 .history_sta
+sim_build_cocotb/
+sim_build/
+__pycache__/
+*.pyc

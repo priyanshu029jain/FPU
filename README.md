@@ -123,7 +123,8 @@ floating_point_unit/
 │   ├── CRV_tb/                         # Tier 2: Constrained Random Verification (1,000 cases)
 │   ├── large_cases/                    # Tier 3: Massive regression suite (2,800+ vectors)
 │   ├── corner_case/                    # Tier 4: Edge-case & IEEE 754 boundary testbenches
-│   └── SVA/                            # Tier 5: Formal SystemVerilog Assertions checkers
+│   ├── SVA/                            # Tier 5: Formal SystemVerilog Assertions checkers
+│   └── cocotb_tb/                      # Tier 6: Python Cocotb Co-simulation (4,000+ vectors)
 ├── script/                             # ASIC synthesis & Static Timing Analysis scripts
 │   ├── synth_yosys.tcl                 # Generic top synthesis script (Yosys)
 │   ├── synth_fpu_*.tcl                 # Unit-specific Yosys synthesis scripts
@@ -149,15 +150,16 @@ floating_point_unit/
 
 ## 🧪 Multi-Tier Verification & Test Suite
 
-The verification strategy follows a 5-tier pyramid ensuring 100% functional correctness across standard operations, subnormals, infinities, NaNs, and algebraic corner cases:
+The verification strategy follows a multi-tier pyramid ensuring 100% functional correctness across standard operations, subnormals, infinities, NaNs, and algebraic corner cases:
 
 ```
                   ▲
-                 / \     Tier 5: SystemVerilog Assertions (SVA Concurrent Checkers)
-                /   \    Tier 4: Dedicated Corner-Case Suites (tb_corner_*.sv)
-               /     \   Tier 3: Algebraic Invariance Suites (2,800+ Vectors)
-              /       \  Tier 2: Constrained Random Verification (CRV 1,000 Trans.)
-             /_________\ Tier 1: Unit & Component Regressions (180+ Vectors)
+                 / \     Tier 6: Python Cocotb Co-simulation (4,000+ Vectors & Scoreboard)
+                /   \    Tier 5: SystemVerilog Assertions (SVA Concurrent Checkers)
+               /     \   Tier 4: Dedicated Corner-Case Suites (tb_corner_*.sv)
+              /       \  Tier 3: Algebraic Invariance Suites (2,800+ Vectors)
+             /         \ Tier 2: Constrained Random Verification (CRV 1,000 Trans.)
+            /___________\Tier 1: Unit & Component Regressions (180+ Vectors)
 ```
 
 | Verification Tier | Testbench | Vectors | Features Verified |
@@ -167,6 +169,7 @@ The verification strategy follows a 5-tier pyramid ensuring 100% functional corr
 | **Tier 3: Invariance** | `tb/large_cases/tb_large_cases.sv` | 2,800+ | Algebraic identities: identity ($A+0, A\times 1$), commutativity ($A+B = B+A$), zero annihilation ($A\times 0$), sign symmetry. |
 | **Tier 4: Corner Cases** | `tb/corner_case/tb_corner_*.sv` | 400+ | Overflow boundaries ($E=254 \rightarrow 255$), underflow boundaries ($E=1 \rightarrow 0$), subnormal rounding, exact tie even roundings. |
 | **Tier 5: SVA Assertions** | `tb/SVA/sva_*.sv` | 47 Checkers | Formal protocol & math assertions running concurrently in Verilator (`--assert`). |
+| **Tier 6: Cocotb Python** | `tb/cocotb_tb/test_fpu_cocotb.py` | **4,052** | Python co-simulation with `math.fma` golden reference model, ULP tolerance, and self-checking scoreboard (**100% Pass**). |
 
 ---
 
@@ -265,6 +268,11 @@ Make sure the required EDA tools are installed and in your `PATH`:
 ./run sva_multiplier     # Concurrent SVA checker: Multiplier (12 assertions)
 ./run sva_division       # Concurrent SVA checker: Divider (13 assertions)
 ./run sva_mac            # Concurrent SVA checker: MAC (11 assertions)
+
+# -----------------------------------------------------------------------------
+# Tier 6: Python Cocotb Co-simulation & Scoreboard (4,000+ Vectors)
+# -----------------------------------------------------------------------------
+./run cocotb             # Runs 4,052 automated tests with self-checking scoreboard
 ```
 
 ---

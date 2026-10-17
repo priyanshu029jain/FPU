@@ -34,6 +34,23 @@ if [ "$TARGET" = "synth" ] || [ "$TARGET" = "synthesis" ]; then
     exit 0
 fi
 
+if [ "$TARGET" = "cocotb" ] || [ "$TARGET" = "python" ]; then
+    PYTHON_CMD=""
+    if command -v python >/dev/null 2>&1; then
+        PYTHON_CMD="python"
+    elif command -v python.exe >/dev/null 2>&1; then
+        PYTHON_CMD="python.exe"
+    elif [ -f "/mnt/c/Users/LENOVO/AppData/Local/Programs/Python/Python313/python.exe" ]; then
+        PYTHON_CMD="/mnt/c/Users/LENOVO/AppData/Local/Programs/Python/Python313/python.exe"
+    elif [ -f "/c/Users/LENOVO/AppData/Local/Programs/Python/Python313/python.exe" ]; then
+        PYTHON_CMD="/c/Users/LENOVO/AppData/Local/Programs/Python/Python313/python.exe"
+    elif command -v python3 >/dev/null 2>&1; then
+        PYTHON_CMD="python3"
+    fi
+    $PYTHON_CMD tb/cocotb_tb/run_cocotb.py
+    exit 0
+fi
+
 # 2. Map target to RTL, Testbench, and VCD output
 case "$TARGET" in
     adder|param_adder_sub)
