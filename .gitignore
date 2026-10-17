@@ -10,3 +10,4 @@ sim_top.vvp
 sim_corner.vvp
 sim_crv.vvp
 sim_large.vvp
+obj_dir/

@@ -599,6 +599,29 @@ The verification environment is partitioned into four complementary, non-overlap
    - Validates that output $Y$ reliably produces each required output state: `+0.0`, `-0.0`, `+Inf`, `-Inf`, and `NaN`.
    - 497 corner cases executed across all 5 testbenches, 100% PASS.
 
+5. **Tier 5 — SystemVerilog Assertions (SVA) Formal Verification Suite (`SVA`)**:
+   - Location: `tb/SVA/sva_adder.sv` (IEEE 1800 SystemVerilog concurrent assertions).
+   - Module: `sva_adder` (standalone self-checking checker module instantiating `FPU_adder` DUT).
+   - Engine: Executed with Verilator concurrent assertion engine (`verilator --binary --timing --assert --trace`).
+   - Every property is protected against asynchronous reset transients using `disable iff (!rst_n)`.
+   - Verified 7 distinct assertion and cover property categories:
+     * **Property 1 (Pipeline Latency)**: Asserts that `valid_out` pulses high exactly 4 clock cycles after `valid_in` assertion (`$past(valid_in, 4) |-> valid_out`).
+     * **Property 2 (No Premature `valid_out`)**: Ensures no spurious assertion of `valid_out` occurs before the 4-cycle pipeline latency has elapsed (`valid_out |-> $past(valid_in, 4)`).
+     * **Property 3 (Result Stability)**: Asserts that once `valid_out` is high, result $Y$ remains stable across any cycle where pipeline inputs are held static.
+     * **Property 4 (No Unknowns)**: Asserts that output $Y$ is completely free of high-impedance (`Z`) or uninitialized (`X`) bits whenever `valid_out` is high (`!$isunknown(Y)`).
+     * **Property 5 (IEEE-754 Special Cases)**:
+       - **5A (NaN Propagation)**: If input $A$ or $B$ is NaN, output $Y$ must be NaN (`(is_nan(A) || is_nan(B)) |-> is_nan(Y)`).
+       - **5B (Inf Opposite Signs)**: $+ \infty + (-\infty)$ or $-\infty + (+\infty)$ must trigger an invalid operation and output NaN.
+       - **5C (Zero Addition)**: Any combination of $+0.0$ and $-0.0$ addition must produce a zero result ($Y \in \{+0.0, -0.0\}$) with `flag_zero` asserted.
+     * **Property 6 (Exception Flags Consistency)**:
+       - **6A (Overflow)**: When `flag_overflow` is asserted, output exponent must be `8'd255` (saturated to infinity).
+       - **6B (Underflow)**: When `flag_underflow` is asserted, output exponent must be `8'd0` (flushed to zero).
+       - **6C (Invalid Operation)**: When `flag_invalid` is asserted, output $Y$ must be NaN.
+     * **Property 7 (Functional Correctness)**: Asserts that output $Y$ exactly matches golden double-precision IEEE 754 reference model `ref_model(A, B)` for normalized operations.
+   - SVA Cover Properties (`cov_latency`, `cov_nan_prop`, `cov_inf_opposite`, `cov_zero_add`, `cov_overflow`, `cov_invalid`, `cov_functional`, etc.) provide comprehensive functional coverage tracking.
+   - 100% PASS with 0 assertion failures.
+
+
 ---
 
 ## 5. User Command Guide & Simulation Execution
@@ -638,6 +661,10 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 ./run corner_division    # 92 corner tests for FPU_division
 ./run corner_mac         # 87 corner tests for FPU_mac
 ./run corner_top         # 128 unified top-level corner tests
+
+# SystemVerilog Assertions (SVA) Checker Suite (Tier 5: SVA)
+./run sva_adder          # Standalone SVA checker with 11 concurrent assertions
+
 ```
 
 ---
@@ -659,6 +686,7 @@ All implementations, verified fixes, and automated testbenches are committed and
 - `2ae0975` : Migration of CRV testbench to pure SystemVerilog (`tb_crv_fpu.sv`) with class architecture.
 - `208584a` : Expansion of `tb_large_cases.sv` to 2,800+ test vectors across 6 algebraic invariance sections.
 - `d27eb58` : Dedicated individual unit corner-case suites (`tb_corner_*.sv`), zero-flag qualification on infinity cancellation, and unified launcher expansion.
-- `HEAD`    : Comprehensive documentation of 4-tier verification suite (4,477 total vectors / 100% pass rate).
+- `8df73ae` : Initialized `tb/SVA` directory for SystemVerilog Assertions verification suite.
+- `HEAD`    : Standalone SystemVerilog Assertions (SVA) checker module (`sva_adder.sv`) with 7 property categories, Verilator assertions engine support, and updated 5-tier documentation.
 
 
