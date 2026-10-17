@@ -12,12 +12,12 @@ read_verilog script/fpu_adder_mapped.v
 # 3. Link the top module
 link_design FPU_adder
 
-# 4. Create primary clock constraint (100 MHz target, period = 10.0 ns)
+# 4. Create clock constraint (100 MHz target, period = 10.0 ns)
 create_clock -name clk -period 10.0 [get_ports clk]
 
 # 5. Constrain input and output ports relative to the clock
-set_input_delay -clock clk 1.5 [remove_from_collection [all_inputs] [get_ports clk]]
-set_output_delay -clock clk 1.5 [all_outputs]
+set_input_delay -clock clk 0 [all_inputs]
+set_output_delay -clock clk 0 [all_outputs]
 
 # ------------------------------------------------------------------
 # 1. TIMING REPORT (Setup & Critical Path Delay)
@@ -27,7 +27,7 @@ puts "                TIMING REPORT (CRITICAL PATH)          "
 puts "========================================================"
 
 # Report checks for worst setup (max delay) critical timing paths
-report_checks -path_delay max -digits 4 > script/timing_report_adder.txt
+report_checks -path_delay max -digits 4 > analysis/asic/fpu_adder_timing.txt
 
 # Report slack summary
 report_worst_slack -max
@@ -39,6 +39,6 @@ report_worst_slack -min
 puts "\n========================================================"
 puts "                POWER CONSUMPTION REPORT               "
 puts "========================================================"
-report_power > script/power_report_adder.txt
+report_power > analysis/asic/fpu_adder_power.txt
 
 exit
