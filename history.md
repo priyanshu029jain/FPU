@@ -414,6 +414,80 @@ Replaced all raw operator glue with formal instantiations of the 4 parameterized
 
 ---
 
+### Failure 9: Icarus Verilog Class Member Inline Initializer Reset Gotcha
+
+#### 1. Context & Observed Behavior
+During the initial execution of the newly migrated SystemVerilog CRV testbench (`tb_crv_fpu.sv`), the simulation ran 1,000 iterations, but the final scoreboard report printed:
+```
+Total Completed Transactions : 1
+Passed Validations           : 1
+```
+
+#### 2. Root Cause Analysis
+In Icarus Verilog 12.0, class member variables declared with inline initializers (`int total_checks = 0;`) exhibit buggy behavior: on each function call into the class, Icarus re-evaluates the inline initializer, resetting the counters back to `0` rather than preserving persistent instance state across transactions.
+
+#### 3. Engineering Solution
+Removed all inline initializers from class property declarations (`int total_checks;`), and created an explicit SystemVerilog class constructor `function new()`:
+```systemverilog
+function new();
+    this.total_checks = 0;
+    this.pass_checks  = 0;
+    this.fail_checks  = 0;
+    this.add_cnt  = 0; this.add_pass = 0;
+    this.mul_cnt  = 0; this.mul_pass = 0;
+    this.mac_cnt  = 0; this.mac_pass = 0;
+    this.div_cnt  = 0; this.div_pass = 0;
+endfunction
+```
+
+---
+
+### Failure 10: Icarus Verilog Object Member Bit-Select Parser Bug (`obj.field[index]`)
+
+#### 1. Context & Observed Behavior
+In `tb_crv_fpu.sv`, the scoreboard reported false-positive sign parity failures for positive multiplications and divisions:
+```
+[FAIL-CRV] Iteration 871: Sign parity mismatch! op=DIV A=0x3d7bee89 B=0x3eb68fec Got Y=0x3e30a31d
+```
+Both $A$ and $B$ were positive floats ($A[31] = 0, B[31] = 0$), and the output $Y$ was positive ($Y[31] = 0$). Yet the check `if (tr.Y[31] !== (tr.A[31] ^ tr.B[31]))` evaluated to TRUE!
+
+#### 2. Root Cause Analysis
+A parser bug exists in Icarus Verilog 12 where directly indexing a member variable of an object (`tr.Y[31]`) drops the `[31]` bit-select subscript, returning the entire 32-bit vector word. Because `tr.Y` (`0x3e30a31d`) was non-zero and `(tr.A ^ tr.B)` differed, the vector comparison failed.
+
+#### 3. Engineering Solution
+Assigned class properties to local procedural variables first before performing bit-level operations:
+```systemverilog
+logic [31:0] cur_a, cur_b, cur_y;
+cur_a = tr.A;
+cur_b = tr.B;
+cur_y = tr.Y;
+
+if ((tr.op == OP_MUL || tr.op == OP_DIV) && !tr.flag_nan && !tr.flag_zero) begin
+    if (cur_y[31] !== (cur_a[31] ^ cur_b[31])) begin
+        $display("[FAIL-CRV] Iteration %0d: Sign parity mismatch!", iter);
+    end
+end
+```
+After this fix, all 1,000 CRV transactions passed with 100% success.
+
+---
+
+### Failure 11: Unclocked Combinational Interface in Legacy Regression Testbenches
+
+#### 1. Context & Observed Behavior
+The testbenches `tb_crv_fpu.v` and `tb_large_cases.v` instantiated `FPU_top` using the legacy combinational port mapping (`.op(op), .A(A), .B(B), .C(C), .Y(Y)` without `clk`, `rst_n`, or `valid_in`) and evaluated results using `#2`/`#5` combinational delays. When `FPU_top` was converted to a 4-stage pipeline, these testbenches failed to capture pipelined outputs.
+
+#### 2. Root Cause Analysis
+Top-level regression suites had not been synchronized with the 4-stage synchronous pipeline architecture.
+
+#### 3. Engineering Solution
+1. Rewrote `tb_crv_fpu.sv` and `tb_large_cases.sv` in pure SystemVerilog with 100 MHz clock generation and active-low reset.
+2. Applied stimulus synchronously on `@(negedge clk)` with non-blocking assignments (`<=`).
+3. Synchronized output capture using dynamic strobe polling: `while (!valid_out) @(posedge clk); #1;`.
+4. Scaled `tb_crv_fpu.sv` to 1,000 iterations (250+ cases per unit) and `tb_large_cases.sv` to 2,800 iterations across 6 algebraic invariance sections.
+
+---
+
 ## 4. Comprehensive Verification Results & Test Suite Matrix
 
 The complete test suite validates every module against edge cases, extreme exponent boundaries, denormal behavior, and back-to-back streaming throughput.
@@ -481,4 +555,9 @@ All implementations, verified fixes, and automated testbenches are committed and
 - `ec70fa7` : Implementation of 4-stage pipelined `FPU_adder.v` with intermediate registers.
 - `c9b7fb6` : Pipelined implementation across `FPU_multiplier`, `FPU_division`, `FPU_mac`, and `FPU_top`.
 - `814ef8c` : Initial history documentation.
-- `HEAD`    : Comprehensive in-depth failure analysis and mathematical documentation.
+- `85c594e` : Mathematical foundations and detailed failure analyses.
+- `e6b55a9` : Detailed markdown specification files (`documantation/module_*.md`) for all 11 modules.
+- `8537710` : Expansion of CRV test suite to 1,000 iterations (250+ cases per unit) with pipeline timing.
+- `2ae0975` : Migration of CRV testbench to pure SystemVerilog (`tb_crv_fpu.sv`) with class architecture.
+- `208584a` : Expansion of `tb_large_cases.sv` to 2,800+ test vectors across 6 algebraic invariance sections.
+- `HEAD`    : Comprehensive in-depth documentation of SystemVerilog CRV and massive regression suite.
