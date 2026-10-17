@@ -431,7 +431,8 @@ The complete test suite validates every module against edge cases, extreme expon
 | `fpu_division` | `rtl/FPU_division.v` | `tb/sim_tb/tb_fpu_division.v` | 24 | 24 | 0 | `waveform_fpu_division.vcd` |
 | `fpu_mac` | `rtl/FPU_mac.v` | `tb/sim_tb/tb_fpu_mac.v` | 19 | 19 | 0 | `waveform_fpu_mac.vcd` |
 | `top` | `rtl/FPU_top.v` (All Modules) | `tb/sim_tb/tb_fpu_top.v` | 180 | 180 | 0 | `waveform_fpu_top.vcd` |
-| **`crv`** | **`rtl/FPU_top.v` (SystemVerilog CRV)** | **`tb/CRV_tb/tb_crv_fpu.sv`** | **1,000** | **1,000** | **0** | **`waveform_crv.vcd`** |
+| `crv` | `rtl/FPU_top.v` (SystemVerilog CRV) | `tb/CRV_tb/tb_crv_fpu.sv` | 1,000 | 1,000 | 0 | `waveform_crv.vcd` |
+| **`large`** | **`rtl/FPU_top.v` (Massive Invariance)** | **`tb/large_cases/tb_large_cases.sv`** | **2,800** | **2,800** | **0** | **`waveform_large_cases.vcd`** |
 
 ---
 
@@ -462,6 +463,9 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 
 # SystemVerilog Constrained Random Verification (1,000 Iterations / 250+ per Unit)
 ./run crv
+
+# Massive Algebraic Invariance Suite (2,800+ Test Vectors)
+./run large
 ```
 
 ---

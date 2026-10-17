@@ -89,9 +89,15 @@ case "$TARGET" in
         VCD="waveform_crv.vcd"
         MOD_NAME="SystemVerilog Constrained Random Verification CRV (1,000 Iterations / 250+ Per Unit)"
         ;;
+    large|large_cases|tb_large)
+        RTL="rtl/FPU_top.v rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v component/param_adder_sub.v component/param_multiplier.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/large_cases/tb_large_cases.sv"
+        VCD="waveform_large_cases.vcd"
+        MOD_NAME="Massive Regression Suite (2,800+ Test Vectors Across All Units)"
+        ;;
     *)
         echo "Error: Unknown target '$1'!"
-        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv"
+        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv, large"
         exit 1
         ;;
 esac
