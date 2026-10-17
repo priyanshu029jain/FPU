@@ -1,0 +1,78 @@
+
+27. Printing statistics.
+
+=== FPU_top ===
+
+   Number of wires:              30028
+   Number of wire bits:          30028
+   Number of public wires:        2073
+   Number of public wire bits:    2073
+   Number of ports:                142
+   Number of port bits:            142
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              29927
+     sky130_fd_sc_hd__a2111o_1       2
+     sky130_fd_sc_hd__a2111oi_0     42
+     sky130_fd_sc_hd__a211o_2       13
+     sky130_fd_sc_hd__a211oi_1     182
+     sky130_fd_sc_hd__a21boi_0     392
+     sky130_fd_sc_hd__a21o_2        60
+     sky130_fd_sc_hd__a21oi_1     2499
+     sky130_fd_sc_hd__a221o_2        1
+     sky130_fd_sc_hd__a221oi_1      16
+     sky130_fd_sc_hd__a22oi_1      206
+     sky130_fd_sc_hd__a2bb2oi_1     18
+     sky130_fd_sc_hd__a311oi_1      10
+     sky130_fd_sc_hd__a31o_2        16
+     sky130_fd_sc_hd__a31oi_1      241
+     sky130_fd_sc_hd__a32oi_1        7
+     sky130_fd_sc_hd__a41o_2         2
+     sky130_fd_sc_hd__a41oi_1      164
+     sky130_fd_sc_hd__and2_2       102
+     sky130_fd_sc_hd__and3_2       143
+     sky130_fd_sc_hd__and3b_2        1
+     sky130_fd_sc_hd__clkinv_1    3009
+     sky130_fd_sc_hd__dfrtp_1     1196
+     sky130_fd_sc_hd__lpflow_inputiso0p_1     20
+     sky130_fd_sc_hd__maj3_1       337
+     sky130_fd_sc_hd__mux2_2        25
+     sky130_fd_sc_hd__mux2i_1       53
+     sky130_fd_sc_hd__nand2_1     6020
+     sky130_fd_sc_hd__nand3_1     1171
+     sky130_fd_sc_hd__nand3b_1      41
+     sky130_fd_sc_hd__nand4_1      823
+     sky130_fd_sc_hd__nor2_1      4573
+     sky130_fd_sc_hd__nor3_1       553
+     sky130_fd_sc_hd__nor3b_1       18
+     sky130_fd_sc_hd__nor4_1       271
+     sky130_fd_sc_hd__nor4b_1        5
+     sky130_fd_sc_hd__o2111a_1      38
+     sky130_fd_sc_hd__o2111ai_1    113
+     sky130_fd_sc_hd__o211a_1      104
+     sky130_fd_sc_hd__o211ai_1     272
+     sky130_fd_sc_hd__o21a_1       327
+     sky130_fd_sc_hd__o21ai_0     2571
+     sky130_fd_sc_hd__o21ba_2        2
+     sky130_fd_sc_hd__o21bai_1     254
+     sky130_fd_sc_hd__o221a_2       11
+     sky130_fd_sc_hd__o221ai_1      21
+     sky130_fd_sc_hd__o22a_2        23
+     sky130_fd_sc_hd__o22ai_1      158
+     sky130_fd_sc_hd__o2bb2ai_1    103
+     sky130_fd_sc_hd__o311a_2        5
+     sky130_fd_sc_hd__o311ai_0      14
+     sky130_fd_sc_hd__o31a_2         1
+     sky130_fd_sc_hd__o31ai_1       28
+     sky130_fd_sc_hd__o41ai_1       28
+     sky130_fd_sc_hd__or2_2        125
+     sky130_fd_sc_hd__or2b_2         2
+     sky130_fd_sc_hd__or3_2          5
+     sky130_fd_sc_hd__or4_2         10
+     sky130_fd_sc_hd__xnor2_1     1194
+     sky130_fd_sc_hd__xor2_1      2286
+
+   Chip area for module '\FPU_top': 182328.617600
+     of which used for sequential elements: 29928.704000 (16.41%)
+

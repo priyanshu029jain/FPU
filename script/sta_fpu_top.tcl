@@ -16,8 +16,8 @@ link_design FPU_top
 create_clock -name clk -period 10.0 [get_ports clk]
 
 # 5. Constrain input and output ports relative to the clock
-set_input_delay -clock clk 1.5 [remove_from_collection [all_inputs] [get_ports clk]]
-set_output_delay -clock clk 1.5 [all_outputs]
+set_input_delay -clock clk 0 [all_inputs]
+set_output_delay -clock clk 0 [all_outputs]
 
 # ------------------------------------------------------------------
 # 1. TIMING REPORT (Setup & Critical Path Delay)
@@ -27,11 +27,10 @@ puts "                TIMING REPORT (CRITICAL PATH)          "
 puts "========================================================"
 
 # Report checks for worst setup (max delay) critical timing paths
-report_checks -path_delay max -digits 4 > script/timing_report_top.txt
+report_checks -path_delay max -digits 4 > analysis/asic/fpu_top_timing.txt
 
 # Report slack summary
-report_worst_slack -max
-report_worst_slack -min
+report_worst_slack
 
 # ------------------------------------------------------------------
 # 2. POWER REPORT
@@ -39,6 +38,6 @@ report_worst_slack -min
 puts "\n========================================================"
 puts "                POWER CONSUMPTION REPORT               "
 puts "========================================================"
-report_power > script/power_report_top.txt
+report_power > analysis/asic/fpu_top_power.txt
 
 exit
