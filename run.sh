@@ -85,9 +85,9 @@ case "$TARGET" in
         ;;
     crv|tb_crv_fpu|tb_crv)
         RTL="rtl/FPU_top.v rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v component/param_adder_sub.v component/param_multiplier.v component/barrel_shifter.v component/leading_zero_detector.v"
-        TB="tb/CRV_tb/tb_crv_fpu.v"
+        TB="tb/CRV_tb/tb_crv_fpu.sv"
         VCD="waveform_crv.vcd"
-        MOD_NAME="Constrained Random Verification CRV (1,000 Iterations / 250+ Per Unit)"
+        MOD_NAME="SystemVerilog Constrained Random Verification CRV (1,000 Iterations / 250+ Per Unit)"
         ;;
     *)
         echo "Error: Unknown target '$1'!"
