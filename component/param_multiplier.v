@@ -9,7 +9,7 @@
 //   B         : Multiplier operand
 //   is_signed : 1'b0 = Unsigned multiplication, 1'b1 = Signed (Two's complement)
 //   product   : Full-precision product output (Width = A_WIDTH + B_WIDTH = 48 bits)
-// =============================================================================
+`timescale 1ns/1ps
 
 module param_multiplier #(
     parameter A_WIDTH = 24,

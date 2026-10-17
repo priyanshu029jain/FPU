@@ -11,7 +11,7 @@
 //   arith     : 1'b0 = Logical shift (zero fill), 1'b1 = Arithmetic (sign-extend)
 //   data_out  : Shifted data output
 //   sticky    : Reduction OR of all bits shifted off the right boundary (GRS sticky)
-// =============================================================================
+`timescale 1ns/1ps
 
 module barrel_shifter #(
     parameter DATA_WIDTH  = 48,
@@ -27,13 +27,11 @@ module barrel_shifter #(
 
     wire sign_bit = arith ? data_in[DATA_WIDTH-1] : 1'b0;
 
-    // Double-width buffer for right shift sticky detection
-    wire [2*DATA_WIDTH-1:0] r_buffer = {data_in, {DATA_WIDTH{1'b0}}};
-
     integer i;
     reg [DATA_WIDTH-1:0] mask;
 
     always @(*) begin
+        mask = {DATA_WIDTH{1'b0}};
         if (dir == 1'b0) begin
             // Shift Left
             data_out = data_in << shift_amt;
@@ -44,7 +42,11 @@ module barrel_shifter #(
                 data_out = {DATA_WIDTH{sign_bit}};
                 sticky   = |data_in; // Everything shifted out
             end else begin
-                data_out = arith ? ($signed(data_in) >>> shift_amt) : (data_in >> shift_amt);
+                if (arith && sign_bit) begin
+                    data_out = (data_in >> shift_amt) | ({DATA_WIDTH{1'b1}} << (DATA_WIDTH - shift_amt));
+                end else begin
+                    data_out = (data_in >> shift_amt);
+                end
 
                 // Compute sticky bit: check if any bits below shift_amt were 1
                 mask = {DATA_WIDTH{1'b0}};

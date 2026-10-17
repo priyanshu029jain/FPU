@@ -11,7 +11,7 @@
 //   result    : Result output (A + B or A - B)
 //   carry_out : Carry-out from MSB (for unsigned addition) / Borrow
 //   overflow  : Signed overflow flag
-// =============================================================================
+`timescale 1ns/1ps
 
 module param_adder_sub #(
     parameter WIDTH = 32
@@ -30,7 +30,7 @@ module param_adder_sub #(
     wire             cin       = sub;
 
     // Internal (WIDTH+1)-bit adder to capture carry-out
-    wire [WIDTH:0] sum_ext = {1'b0, A} + {1'b0, b_operand} + cin;
+    wire [WIDTH:0] sum_ext = {1'b0, A} + {1'b0, b_operand} + { {WIDTH{1'b0}}, cin};
 
     assign result    = sum_ext[WIDTH-1:0];
     assign carry_out = sum_ext[WIDTH];

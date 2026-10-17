@@ -9,7 +9,7 @@
 //   in_vector : Vector to scan for leading zeros
 //   zero_count: Number of leading zeros (0 to WIDTH)
 //   all_zeros : Flag set high if the input vector contains only zeros
-// =============================================================================
+`timescale 1ns/1ps
 
 module leading_zero_detector #(
     parameter WIDTH       = 32,
@@ -30,7 +30,9 @@ module leading_zero_detector #(
 
         for (idx = WIDTH - 1; idx >= 0; idx = idx - 1) begin
             if (in_vector[idx] == 1'b1 && !found) begin
+                /* verilator lint_off WIDTHTRUNC */
                 zero_count = (WIDTH - 1 - idx);
+                /* verilator lint_on WIDTHTRUNC */
                 all_zeros  = 1'b0;
                 found      = 1'b1;
             end
