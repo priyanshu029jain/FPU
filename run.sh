@@ -23,8 +23,15 @@ if [ -z "$TARGET" ]; then
     echo "  ./run.sh multiplier"
     echo "  ./run.sh barrel_shifter"
     echo "  ./run.sh LZD"
+    echo "  ./run.sh fpu_top"
+    echo "  ./run.sh synth [top|adder|multiplier|division|mac]"
     echo "================================================================="
     exit 1
+fi
+
+if [ "$TARGET" = "synth" ] || [ "$TARGET" = "synthesis" ]; then
+    bash script/run_synth.sh "$2" "$3"
+    exit 0
 fi
 
 # 2. Map target to RTL, Testbench, and VCD output

@@ -677,6 +677,12 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 ./run sva_division       # SVA checker for FPU Divider (13 concurrent assertions)
 ./run sva_mac            # SVA checker for FPU MAC (11 concurrent assertions)
 
+# ASIC Synthesis & Static Timing Analysis Flow (SkyWater 130nm PDK)
+./run synth top          # Synthesize unified FPU_top @ 100 MHz (Yosys + OpenSTA)
+./run synth adder        # Synthesize FPU_adder (Yosys + OpenSTA)
+./run synth multiplier   # Synthesize FPU_multiplier (Yosys + OpenSTA)
+./run synth division     # Synthesize FPU_division (Yosys + OpenSTA)
+./run synth mac          # Synthesize FPU_mac (Yosys + OpenSTA)
 ```
 
 ---
@@ -699,6 +705,37 @@ All implementations, verified fixes, and automated testbenches are committed and
 - `208584a` : Expansion of `tb_large_cases.sv` to 2,800+ test vectors across 6 algebraic invariance sections.
 - `d27eb58` : Dedicated individual unit corner-case suites (`tb_corner_*.sv`), zero-flag qualification on infinity cancellation, and unified launcher expansion.
 - `8df73ae` : Initialized `tb/SVA` directory for SystemVerilog Assertions verification suite.
-- `HEAD`    : Standalone SystemVerilog Assertions (SVA) checker module (`sva_adder.sv`) with 7 property categories, Verilator assertions engine support, and updated 5-tier documentation.
+- `9ac992e` : Implemented SVA checker for FPU_adder (`sva_adder.sv`) with 7 property categories.
+- `fdafc09` : Completed SVA verification suite across all units (`sva_multiplier.sv`, `sva_division.sv`, `sva_mac.sv`).
+- `HEAD`    : Implemented ASIC synthesis and static timing analysis flow (`script/synth_yosys.tcl`, `script/timing.sdc`, `script/sta.tcl`, `script/run_synth.sh`) targeting SkyWater 130nm PDK.
 
 
+
+---
+
+## 7. ASIC Synthesis & Static Timing Analysis (STA) Flow
+
+An industry-grade open-source ASIC synthesis and static timing analysis flow has been implemented in the [`script/`](script/) directory, targeting the **SkyWater 130nm High-Density Standard Cell Library (`sky130_fd_sc_hd__tt_025C_1v80`)**:
+
+1. **Yosys Synthesis Engine (`script/synth_yosys.tcl`)**:
+   - Performs RTL elaboration, FSM extraction, arithmetic optimization, and memory mapping.
+   - Maps sequential logic to Sky130 D-flip-flops via `dfflibmap -liberty sky130.lib`.
+   - Executes technology mapping of combinational logic via ABC logic optimizer (`abc -liberty sky130.lib`).
+   - Produces clean structural gate-level netlists (`synth/<module>_netlist.v`) and detailed cell/area reports (`synth/<module>_synth.rpt`).
+
+2. **Synopsys Design Constraints (`script/timing.sdc`)**:
+   - Clock constraints: Default 100 MHz clock ($T_{clk} = 10.0$ ns) with 250 ps setup uncertainty and 100 ps hold margin.
+   - Input/output delays set to 15% of clock cycle.
+   - External driving cell modeled using `sky130_fd_sc_hd__inv_2` and capacitive output pin load modeled at 35 fF.
+
+3. **OpenSTA Static Timing Analysis (`script/sta.tcl`)**:
+   - Links synthesized structural netlist with `sky130.lib` timing models.
+   - Analyzes Worst Negative Slack (WNS), Total Negative Slack (TNS), setup/hold critical paths, and total cell area.
+   - Generates comprehensive timing reports (`synth/<module>_sta.rpt`).
+
+4. **Automated Runner (`script/run_synth.sh` & `./run synth`)**:
+   - Orchestrates the full RTL-to-STA pipeline with a single command:
+     ```bash
+     ./script/run_synth.sh top 10.0   # Synthesizes FPU_top @ 100 MHz
+     ./script/run_synth.sh adder 5.0  # Synthesizes FPU_adder @ 200 MHz
+     ```
