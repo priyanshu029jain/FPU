@@ -467,24 +467,39 @@ if ((tr.op == OP_MUL || tr.op == OP_DIV) && !tr.flag_nan && !tr.flag_zero) begin
         $display("[FAIL-CRV] Iteration %0d: Sign parity mismatch!", iter);
     end
 end
-```
-After this fix, all 1,000 CRV transactions passed with 100% success.
-
 ---
 
-### Failure 11: Unclocked Combinational Interface in Legacy Regression Testbenches
+### Failure 12: Spurious Assertion of `flag_zero` on Indeterminate Infinity Subtraction Cancellation
 
 #### 1. Context & Observed Behavior
-The testbenches `tb_crv_fpu.v` and `tb_large_cases.v` instantiated `FPU_top` using the legacy combinational port mapping (`.op(op), .A(A), .B(B), .C(C), .Y(Y)` without `clk`, `rst_n`, or `valid_in`) and evaluated results using `#2`/`#5` combinational delays. When `FPU_top` was converted to a 4-stage pipeline, these testbenches failed to capture pipelined outputs.
+During dedicated corner-case testing of `FPU_adder` and `FPU_mac`, applying the indeterminate subtraction $(+\text{Inf}) - (+\text{Inf})$ (or $(+\text{Inf}) + (-\text{Inf})$) produced the canonical Quiet NaN (`0x7FC00000`) and correctly asserted `flag_invalid = 1`. However, `flag_zero` was unexpectedly also asserted (`flag_zero = 1`).
 
 #### 2. Root Cause Analysis
-Top-level regression suites had not been synchronized with the 4-stage synchronous pipeline architecture.
+In both `FPU_adder.v` and `FPU_mac.v`, the significand subtraction pipeline registers evaluated raw difference equality:
+```verilog
+// FPU_adder.v (Stage 2 -> Stage 3)
+r2_is_zero <= r1_is_zero | (s2_sum_sigf == 28'b0);
+
+// FPU_mac.v (Stage 3 -> Stage 4)
+r3_zero <= r2_zero | (s3_sum_raw == 101'b0);
+```
+When subtracting equal infinity operands, the aligned significands are identical (`1.0 - 1.0 = 0.0`), producing an all-zero intermediate difference. Because the intermediate zero-detection logic did not qualify against active special cases (`!r1_special` / `!r2_special`), the pipeline erroneously latched the zero state, which then propagated to the output status register in Stage 4.
 
 #### 3. Engineering Solution
-1. Rewrote `tb_crv_fpu.sv` and `tb_large_cases.sv` in pure SystemVerilog with 100 MHz clock generation and active-low reset.
-2. Applied stimulus synchronously on `@(negedge clk)` with non-blocking assignments (`<=`).
-3. Synchronized output capture using dynamic strobe polling: `while (!valid_out) @(posedge clk); #1;`.
-4. Scaled `tb_crv_fpu.sv` to 1,000 iterations (250+ cases per unit) and `tb_large_cases.sv` to 2,800 iterations across 6 algebraic invariance sections.
+1. **Pipelined Zero Qualification**: Guarded intermediate zero accumulation with special bypass flags:
+   ```verilog
+   // In FPU_adder.v
+   r2_is_zero <= r1_is_zero | (!r1_special && (s2_sum_sigf == 28'b0));
+
+   // In FPU_mac.v
+   r3_zero <= r2_zero | (!r2_special && (s3_sum_raw == 101'b0));
+   ```
+2. **Stage 4 Multiplexing Integrity**: Prioritized `r3_special_val` checks in final flag assignment:
+   ```verilog
+   // In FPU_adder.v & FPU_mac.v
+   flag_zero <= r3_special ? (r3_special_val[30:0] == 31'b0) : (r3_is_zero | (s4_result[30:0] == 31'b0));
+   ```
+After this fix, $(+\text{Inf}) - (+\text{Inf})$ produces `Y = 0x7FC00000`, `flag_invalid = 1`, and `flag_zero = 0` with complete IEEE 754-2008 compliance.
 
 ---
 
@@ -506,7 +521,12 @@ The complete test suite validates every module against edge cases, extreme expon
 | `fpu_mac` | `rtl/FPU_mac.v` | `tb/sim_tb/tb_fpu_mac.v` | 19 | 19 | 0 | `waveform_fpu_mac.vcd` |
 | `top` | `rtl/FPU_top.v` (All Modules) | `tb/sim_tb/tb_fpu_top.v` | 180 | 180 | 0 | `waveform_fpu_top.vcd` |
 | `crv` | `rtl/FPU_top.v` (SystemVerilog CRV) | `tb/CRV_tb/tb_crv_fpu.sv` | 1,000 | 1,000 | 0 | `waveform_crv.vcd` |
-| **`large`** | **`rtl/FPU_top.v` (Massive Invariance)** | **`tb/large_cases/tb_large_cases.sv`** | **2,800** | **2,800** | **0** | **`waveform_large_cases.vcd`** |
+| `large` | `rtl/FPU_top.v` (Massive Invariance) | `tb/large_cases/tb_large_cases.sv` | 2,800 | 2,800 | 0 | `waveform_large_cases.vcd` |
+| **`corner_adder`** | **`rtl/FPU_adder.v`** | **`tb/corner_case/tb_corner_adder.sv`** | **93** | **93** | **0** | **`waveform_corner_adder.vcd`** |
+| **`corner_multiplier`** | **`rtl/FPU_multiplier.v`** | **`tb/corner_case/tb_corner_multiplier.sv`** | **97** | **97** | **0** | **`waveform_corner_multiplier.vcd`** |
+| **`corner_division`** | **`rtl/FPU_division.v`** | **`tb/corner_case/tb_corner_division.sv`** | **92** | **92** | **0** | **`waveform_corner_division.vcd`** |
+| **`corner_mac`** | **`rtl/FPU_mac.v`** | **`tb/corner_case/tb_corner_mac.sv`** | **87** | **87** | **0** | **`waveform_corner_mac.vcd`** |
+| **`corner_top`** | **`rtl/FPU_top.v`** | **`tb/corner_case/tb_corner_top.sv`** | **128** | **128** | **0** | **`waveform_corner_top.vcd`** |
 
 ---
 
@@ -518,7 +538,7 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 3. Executes simulation (`vvp sim.vvp`).
 4. Generates VCD waveforms and launches GTKWave automatically.
 
-### Running Individual Units:
+### Running Verification Targets:
 ```bash
 # Foundational Subcomponents
 ./run adder
@@ -540,6 +560,13 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 
 # Massive Algebraic Invariance Suite (2,800+ Test Vectors)
 ./run large
+
+# Dedicated Unit Corner-Case Verification Suites (SystemVerilog)
+./run corner_adder       # 93 corner tests for FPU_adder
+./run corner_multiplier  # 97 corner tests for FPU_multiplier
+./run corner_division    # 92 corner tests for FPU_division
+./run corner_mac         # 87 corner tests for FPU_mac
+./run corner_top         # 128 unified top-level corner tests
 ```
 
 ---
@@ -560,4 +587,5 @@ All implementations, verified fixes, and automated testbenches are committed and
 - `8537710` : Expansion of CRV test suite to 1,000 iterations (250+ cases per unit) with pipeline timing.
 - `2ae0975` : Migration of CRV testbench to pure SystemVerilog (`tb_crv_fpu.sv`) with class architecture.
 - `208584a` : Expansion of `tb_large_cases.sv` to 2,800+ test vectors across 6 algebraic invariance sections.
-- `HEAD`    : Comprehensive in-depth documentation of SystemVerilog CRV and massive regression suite.
+- `32d189c` : Dedicated individual unit corner-case suites (`tb_corner_*.sv`), zero-flag qualification on infinity cancellation, and unified launcher expansion.
+

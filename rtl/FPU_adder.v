@@ -241,7 +241,7 @@ module FPU_adder (
             r2_special     <= r1_special;
             r2_special_val <= r1_special_val;
             r2_invalid     <= r1_invalid;
-            r2_is_zero     <= r1_is_zero | (s2_sum_sigf == 28'b0);
+            r2_is_zero     <= r1_is_zero | (!r1_special && (s2_sum_sigf == 28'b0));
         end
     end
 
@@ -415,7 +415,7 @@ module FPU_adder (
                 flag_overflow  <= !r3_special & s4_overflow;
                 flag_underflow <= !r3_special & s4_underflow & (r3_norm_sigf != 28'b0);
                 flag_invalid   <= r3_invalid;
-                flag_zero      <= r3_is_zero | (s4_result[30:0] == 31'b0);
+                flag_zero      <= r3_special ? (r3_special_val[30:0] == 31'b0) : (r3_is_zero | (s4_result[30:0] == 31'b0));
                 flag_inexact   <= !r3_special & (|s4_grs);
             end
         end

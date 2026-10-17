@@ -95,9 +95,39 @@ case "$TARGET" in
         VCD="waveform_large_cases.vcd"
         MOD_NAME="Massive Regression Suite (2,800+ Test Vectors Across All Units)"
         ;;
+    corner_adder|corneradder)
+        RTL="rtl/FPU_adder.v component/param_adder_sub.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/corner_case/tb_corner_adder.sv"
+        VCD="waveform_corner_adder.vcd"
+        MOD_NAME="Corner-Case Regression: FPU Adder (IEEE 754)"
+        ;;
+    corner_multiplier|cornermultiplier|corner_mul)
+        RTL="rtl/FPU_multiplier.v component/param_multiplier.v component/param_adder_sub.v component/barrel_shifter.v"
+        TB="tb/corner_case/tb_corner_multiplier.sv"
+        VCD="waveform_corner_multiplier.vcd"
+        MOD_NAME="Corner-Case Regression: FPU Multiplier (IEEE 754)"
+        ;;
+    corner_division|cornerdivision|corner_div)
+        RTL="rtl/FPU_division.v component/param_adder_sub.v component/barrel_shifter.v"
+        TB="tb/corner_case/tb_corner_division.sv"
+        VCD="waveform_corner_division.vcd"
+        MOD_NAME="Corner-Case Regression: FPU Divider (IEEE 754)"
+        ;;
+    corner_mac|cornermac)
+        RTL="rtl/FPU_mac.v component/param_multiplier.v component/param_adder_sub.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/corner_case/tb_corner_mac.sv"
+        VCD="waveform_corner_mac.vcd"
+        MOD_NAME="Corner-Case Regression: FPU MAC (IEEE 754)"
+        ;;
+    corner_top|cornertop|corner|corner_cases)
+        RTL="rtl/FPU_top.v rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v component/param_adder_sub.v component/param_multiplier.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/corner_case/tb_corner_top.sv"
+        VCD="waveform_corner_top.vcd"
+        MOD_NAME="Corner-Case Regression: Unified FPU Top (IEEE 754)"
+        ;;
     *)
         echo "Error: Unknown target '$1'!"
-        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv, large"
+        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv, large, corner_adder, corner_multiplier, corner_division, corner_mac, corner_top"
         exit 1
         ;;
 esac

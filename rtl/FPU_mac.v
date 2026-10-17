@@ -361,7 +361,7 @@ module FPU_mac (
             r3_special        <= r2_special;
             r3_special_val    <= r2_special_val;
             r3_nan            <= r2_nan;
-            r3_zero           <= r2_zero | (s3_sum_raw == 101'b0);
+            r3_zero           <= r2_zero | (!r2_special && (s3_sum_raw == 101'b0));
             r3_prod_zero      <= r2_prod_zero;
             r3_C_zero         <= r2_C_zero;
             r3_C_val          <= r2_C_val;
@@ -503,7 +503,7 @@ module FPU_mac (
                 flag_overflow  <= !r3_special & s4_overflow;
                 flag_underflow <= !r3_special & s4_underflow & !r3_zero;
                 flag_invalid   <= r3_nan;
-                flag_zero      <= r3_zero | (s4_result[30:0] == 31'b0);
+                flag_zero      <= r3_special ? (r3_special_val[30:0] == 31'b0) : (r3_zero | (s4_result[30:0] == 31'b0));
                 flag_inexact   <= !r3_special & (|s4_grs);
             end
         end
