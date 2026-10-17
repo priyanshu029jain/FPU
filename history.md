@@ -527,6 +527,77 @@ The complete test suite validates every module against edge cases, extreme expon
 | **`corner_division`** | **`rtl/FPU_division.v`** | **`tb/corner_case/tb_corner_division.sv`** | **92** | **92** | **0** | **`waveform_corner_division.vcd`** |
 | **`corner_mac`** | **`rtl/FPU_mac.v`** | **`tb/corner_case/tb_corner_mac.sv`** | **87** | **87** | **0** | **`waveform_corner_mac.vcd`** |
 | **`corner_top`** | **`rtl/FPU_top.v`** | **`tb/corner_case/tb_corner_top.sv`** | **128** | **128** | **0** | **`waveform_corner_top.vcd`** |
+| **TOTAL VERIFICATION** | **All Modules & Engines** | **All 4 Testbench Suites** | **4,477** | **4,477** | **0** | **100.0% Pass Rate** |
+
+---
+
+### 4.2 Comprehensive 4-Tier Testbench Architecture
+
+The verification environment is partitioned into four complementary, non-overlapping verification tiers:
+
+```
++--------------------------------------------------------------------------------------------------+
+|                                4-TIER HARDWARE VERIFICATION SUITE                                |
++--------------------------------------------------------------------------------------------------+
+|  Tier 1: Standard Directed (sim_tb)         |  Tier 2: Constrained Random Verification (CRV_tb)  |
+|  - 180 Directed Test Vectors                |  - 1,000 Transactions (250+ per Arithmetic Unit)  |
+|  - Subcomponent & Integrated FPU Checks     |  - SystemVerilog Class-Based Architecture        |
+|  - Basic Zero, Infinity & Denormal Paths    |  - Parity Invariants & Undefined State Detection |
++---------------------------------------------+----------------------------------------------------+
+|  Tier 3: Massive Invariance (large_cases)   |  Tier 4: Dedicated Corner Cases (corner_case)     |
+|  - 2,800 Pipelined Streaming Vectors        |  - 497 Exhaustive Boundary & Sign Vectors         |
+|  - 6 Fundamental Algebraic Laws Tested      |  - Explicit IEEE 754 Exception Flag Triggers      |
+|  - Back-to-Back 1-Op/Cycle Stress           |  - Sign Quadrants (+/+, +/-, -/+, -/-) with 0/Inf |
++--------------------------------------------------------------------------------------------------+
+```
+
+1. **Tier 1 — Standard Directed Suite (`sim_tb`)**:
+   - Location: `tb/sim_tb/tb_fpu_top.v` (plus foundational subcomponent testbenches).
+   - Validates baseline functional correctness across small/large operands, positive/negative values, and basic special cases.
+   - 180 directed test cases executed, 100% PASS.
+
+2. **Tier 2 — Object-Oriented Constrained Random Verification (`CRV_tb`)**:
+   - Location: `tb/CRV_tb/tb_crv_fpu.sv` (SystemVerilog IEEE 1800-2012).
+   - Employs SystemVerilog `fpu_transaction`, `fpu_driver`, `fpu_monitor`, and `fpu_scoreboard` classes.
+   - Constrains exponents into normalized dynamic ranges $[120:134]$ ($2^{-7}$ to $2^{+7}$) with random mantissa distributions.
+   - Verifies mathematical invariants:
+     * Sign parity law: $S_y = S_a \oplus S_b$ for all non-zero multiplication and division.
+     * Zero flag consistency: `flag_zero` asserted if and only if $Y[30:0] == 0$.
+     * Unknown state protection: detects any high-impedance (`Z`) or uninitialized (`X`) bits via `$isunknown(Y)`.
+   - 1,000 transactions (guaranteed 250+ per unit), 100% PASS.
+
+3. **Tier 3 — Massive Algebraic Invariance Suite (`large_cases`)**:
+   - Location: `tb/large_cases/tb_large_cases.sv`.
+   - Exercises 2,800 test vectors under back-to-back streaming throughput (1 operation / clock cycle) validating core IEEE 754 algebraic invariants:
+     * Section 1: Additive Identity Law ($X + 0.0 = X$) — 500 vectors.
+     * Section 2: Inversion Cancellation Law ($X + (-X) = +0.0$) — 500 vectors.
+     * Section 3: Multiplicative Identity Law ($X \times 1.0 = X$) — 500 vectors.
+     * Section 4: Multiplicative Zero Property ($X \times 0.0 = 0.0$) — 300 vectors.
+     * Section 5: Division by Unity Identity ($X / 1.0 = X$) — 500 vectors.
+     * Section 6: Fused Multiply-Add Identities ($X \times 1.0 + 0.0 = X$) — 500 vectors.
+   - 2,800 test cases executed, 100% PASS.
+
+4. **Tier 4 — Dedicated Unit Corner-Case Suites (`corner_case`)**:
+   - Locations:
+     * `tb/corner_case/tb_corner_adder.sv` (93 vectors)
+     * `tb/corner_case/tb_corner_multiplier.sv` (97 vectors)
+     * `tb/corner_case/tb_corner_division.sv` (92 vectors)
+     * `tb/corner_case/tb_corner_mac.sv` (87 vectors)
+     * `tb/corner_case/tb_corner_top.sv` (128 vectors)
+   - Systematically tests all four sign quadrants $(+,\,+)$, $(+,\,-)$, $(-,\,+)$, and $(-,\,-)$ paired with boundary constants:
+     * Signed Zeros: `+0.0` (`0x00000000`), `-0.0` (`0x80000000`).
+     * Infinities: `+Inf` (`0x7F800000`), `-Inf` (`0xFF800000`).
+     * NaNs: Canonical Quiet NaN (`0x7FC00000`), Signaling NaN (`0x7F800001`).
+     * Maximum and Minimum normalized floats: `MaxFloat` (`0x7F7FFFFF`), `MinNorm` (`0x00800000`).
+   - Explicitly triggers and validates all decomposed IEEE 754-2008 exception and status flags:
+     * `flag_overflow` (MaxFloat saturation to $\pm\infty$).
+     * `flag_underflow` (exponent underflow flush-to-zero).
+     * `flag_invalid` ($0 \times \infty$, $0/0$, $\infty/\infty$, $\infty - \infty$, NaN inputs).
+     * `flag_div_by_zero` ($X / \pm 0.0 \rightarrow \pm\infty$).
+     * `flag_zero` (exact zero cancellation, signed zero multiplications/divisions).
+     * `flag_inexact` (rounding truncation and non-zero division remainders).
+   - Validates that output $Y$ reliably produces each required output state: `+0.0`, `-0.0`, `+Inf`, `-Inf`, and `NaN`.
+   - 497 corner cases executed across all 5 testbenches, 100% PASS.
 
 ---
 
@@ -552,16 +623,16 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 ./run fpu_division
 ./run fpu_mac
 
-# Master 180+ Test Comprehensive Regression Suite
+# Master 180+ Test Comprehensive Regression Suite (Tier 1: sim_tb)
 ./run top
 
-# SystemVerilog Constrained Random Verification (1,000 Iterations / 250+ per Unit)
+# SystemVerilog Constrained Random Verification (Tier 2: CRV_tb - 1,000 Iterations / 250+ per Unit)
 ./run crv
 
-# Massive Algebraic Invariance Suite (2,800+ Test Vectors)
+# Massive Algebraic Invariance Suite (Tier 3: large_cases - 2,800+ Test Vectors)
 ./run large
 
-# Dedicated Unit Corner-Case Verification Suites (SystemVerilog)
+# Dedicated Individual Unit Corner-Case Suites (Tier 4: corner_case - 497 Vectors)
 ./run corner_adder       # 93 corner tests for FPU_adder
 ./run corner_multiplier  # 97 corner tests for FPU_multiplier
 ./run corner_division    # 92 corner tests for FPU_division
@@ -587,5 +658,7 @@ All implementations, verified fixes, and automated testbenches are committed and
 - `8537710` : Expansion of CRV test suite to 1,000 iterations (250+ cases per unit) with pipeline timing.
 - `2ae0975` : Migration of CRV testbench to pure SystemVerilog (`tb_crv_fpu.sv`) with class architecture.
 - `208584a` : Expansion of `tb_large_cases.sv` to 2,800+ test vectors across 6 algebraic invariance sections.
-- `32d189c` : Dedicated individual unit corner-case suites (`tb_corner_*.sv`), zero-flag qualification on infinity cancellation, and unified launcher expansion.
+- `d27eb58` : Dedicated individual unit corner-case suites (`tb_corner_*.sv`), zero-flag qualification on infinity cancellation, and unified launcher expansion.
+- `HEAD`    : Comprehensive documentation of 4-tier verification suite (4,477 total vectors / 100% pass rate).
+
 
