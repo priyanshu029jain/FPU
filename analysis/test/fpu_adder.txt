@@ -1,0 +1,113 @@
+====================================================================================================
+                        FPU_ADDER MULTI-TIER VERIFICATION REPORT
+====================================================================================================
+Generated Timestamp : 2026-10-18 01:34:31
+Target Module       : FPU_adder (IEEE 754 Single-Precision Floating-Point Adder/Subtractor)
+Pipeline Structure  : 4-Stage Synchronous Pipeline (Deterministic 4-Cycle Latency)
+Verification Status : 100% ALL TESTS PASSED ACROSS ALL 6 TIERS
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+1. EXECUTIVE VERIFICATION SCOREBOARD SUMMARY
+----------------------------------------------------------------------------------------------------
+TIER  VERIFICATION LEVEL              FRAMEWORK / ENGINE       TESTS    PASSED   FAILED   PASS RATE
+----------------------------------------------------------------------------------------------------
+1     Directed Simulation (sim_tb)    Icarus Verilog 12.0      36       36       0        100.00%
+2     Corner-Case Suite (corner_case) SystemVerilog (iverilog) 93       93       0        100.00%
+3     Constrained Random (CRV_tb)     SystemVerilog (iverilog) 250      250      0        100.00%
+4     Algebraic Laws (large_cases)    SystemVerilog (iverilog) 1,000    1,000    0        100.00%
+5     Formal Assertions (SVA)         Verilator 5.032 --assert 11 Props 11 Props 0        100.00%
+6     Python Cocotb Verification      Cocotb 2.1.0 + iverilog  1,012    1,012    0        100.00%
+----------------------------------------------------------------------------------------------------
+TOTAL VERIFIED ADDER TEST VECTORS                              2,402    2,402    0        100.00%
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+2. TIER BREAKDOWN & SPECIFICATION COVERAGE
+----------------------------------------------------------------------------------------------------
+
+TIER 1: DIRECTED SIMULATION (tb/sim_tb/tb_fpu_adder.v)
+  - Part 1: Direct Basic Addition & Subtraction (20 Vectors)
+    * Latency verification: Output valid_out asserts exactly 4 cycles after valid_in.
+    * Additions: 1.0+1.0=2.0, 1.0+2.0=3.0, 2.5+3.75=6.25, 10.0+5.0=15.0, 100.0+25.0=125.0, etc.
+    * Subtractions: 10.0+(-2.5)=7.5, 25.0+(-10.0)=15.0, -2.5+1.25=-1.25, -100.0+50.0=-50.0, etc.
+  - Part 2: Special & Corner Cases (11 Vectors)
+    * Signed zero handling: 0.0 + 5.0 = 5.0, 0.0 + 0.0 = 0.0, 100.0 + (-100.0) = +0.0
+    * Infinities: +Inf + 5.0 = +Inf, -Inf + 5.0 = -Inf, +Inf + (-Inf) = NaN (FlagInvalid=1)
+    * NaNs: NaN + 5.0 = NaN, 5.0 + NaN = NaN
+    * Large Exponent Alignment Difference: 1.0 + 1.0e-30 (sticky bit calculation & align shift)
+  - Part 3: Continuous Pipeline Streaming (5 Vectors)
+    * Back-to-back input injection: 1 vector / cycle sustained throughput.
+    * FIFO latency ordering preserved with 0 pipeline stall.
+  - Result: 36 / 36 PASSED (100.00%)
+
+TIER 2: CORNER-CASE & EDGE REGRESSION (tb/corner_case/tb_corner_adder.sv)
+  - Section 1: Zero Arithmetic (+0.0, -0.0, cross signs)                : 8 / 8 Passed
+  - Section 2: Subnormals & Flush-to-Zero (FTZ) Mode                    : 8 / 8 Passed
+  - Section 3: Infinity Arithmetic & NaNs (SNaN vs QNaN)                : 18 / 18 Passed
+  - Section 4: Exception Flags Triggering (V, U, Z, NV, NX)             : 4 / 4 Passed
+  - Section 5: Target Output Representation Checks                      : 5 / 5 Passed
+  - Section 6: Randomized Sign-Quadrant Stress Loop                     : 50 / 50 Passed
+  - Result: 93 / 93 PASSED (100.00%)
+
+TIER 3: SYSTEMVERILOG CONSTRAINED RANDOM VERIFICATION (tb/CRV_tb/tb_crv_fpu.sv)
+  - Dynamic class-based test environment: fpu_transaction, fpu_scoreboard.
+  - Exponent constraints: [120:134] (normalized numbers avoiding trivial underflow).
+  - Mantissas: Uniformly randomized 23-bit values.
+  - Total transactions targeting FPU_adder (OP_ADD): 250 / 250 Passed (100.00%)
+
+TIER 4: MASSIVE MATHEMATICAL INVARIANCE REGRESSION (tb/large_cases/tb_large_cases.sv)
+  - Section 1: Additive Identity Law: X + 0.0 == X                      : 500 / 500 Passed
+  - Section 2: Inversion Cancellation Law: X + (-X) == 0.0              : 500 / 500 Passed
+  - Result: 1,000 / 1,000 PASSED (100.00%)
+
+TIER 5: FORMAL CONCURRENT SYSTEMVERILOG ASSERTIONS (tb/SVA/sva_adder.sv)
+  - Simulation Engine: Verilator 5.032 with active assertion synthesis.
+  - Property 1: Pipeline Latency - valid_out == 1 exactly 4 cycles after valid_in == 1.
+  - Property 2: No Spurious valid_out - valid_out cannot assert without valid_in 4 cyc prior.
+  - Property 3: Result Stability - Y output remains frozen while inputs stay held.
+  - Property 4: No Unknown States - Output Y contains zero X or Z bits on valid_out.
+  - Property 5: NaN Propagation - If A or B is NaN, Y must be canonical QNaN (0x7fc00000).
+  - Property 6: Opposite-Sign Infinity Cancellation - (+Inf) + (-Inf) triggers invalid flag & NaN.
+  - Property 7: Zero Addition - (+/-0.0) + (+/-0.0) produces zero and asserts flag_zero.
+  - Property 8: Overflow Consistency - flag_overflow implies exponent == 255.
+  - Property 9: Underflow Consistency - flag_underflow implies exponent == 0.
+  - Property 10: Invalid Flag Consistency - flag_invalid implies output is NaN.
+  - Property 11: Throughput Stability - Continuous streaming across consecutive cycles.
+  - Result: 11 / 11 ASSERTIONS MONITORED CLEANLY (0 VIOLATIONS)
+
+TIER 6: PYTHON COCOTB SELF-CHECKING VERIFICATION (tb/cocotb_tb/test_fpu_cocotb.py)
+  - Golden Reference: Python struct-based IEEE 754 float32 software model with FTZ.
+  - Vectors Executed: 1,012 randomized and corner-case vectors.
+  - Verification: Bit-exact mantissa/exponent comparison & exception flag compliance.
+  - Result: 1,012 / 1,012 PASSED (100.00%)
+
+----------------------------------------------------------------------------------------------------
+3. RAW SIMULATION CONSOLE SNIPPETS
+----------------------------------------------------------------------------------------------------
+>>> sim_tb (Icarus Verilog):
+tb_fpu_adder SUMMARY: Total=36, Passed=36, Failed=0
+RESULT: ALL PIPELINED 4-STAGE TESTS PASSED SUCCESSFULLY!
+
+>>> corner_case (tb_corner_adder.sv):
+===============================================================================
+  FPU_ADDER CORNER TEST SUMMARY
+  Total Tests Executed : 93
+  Passed Tests         : 93
+  Failed Tests         : 0
+  STATUS: ALL FPU_ADDER CORNER CASES PASSED!
+===============================================================================
+
+>>> CRV Scoreboard:
+  1. FPU Adder     (OP_ADD) : 250 / 250 Passed (100.00%)
+
+>>> Large Cases Invariance:
+  Section 1: Additive Identity (X + 0 = X)       : 500 / 500 Passed
+  Section 2: Inversion Cancellation (X - X = 0)  : 500 / 500 Passed
+
+>>> SVA Engine (Verilator 5.032):
+  ALL 11 CONCURRENT SVA ASSERTIONS & COVER PROPERTIES MONITORED CLEANLY!
+
+>>> Cocotb Scoreboard:
+ADD/SUB (Y = A + B)            | 1012     | 1012     | 0        | 100.00%
+====================================================================================================

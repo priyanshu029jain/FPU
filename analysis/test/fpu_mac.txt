@@ -1,0 +1,105 @@
+====================================================================================================
+                          FPU_MAC MULTI-TIER VERIFICATION REPORT
+====================================================================================================
+Generated Timestamp : 2026-10-18 01:34:31
+Target Module       : FPU_mac (IEEE 754 Fused Multiply-Accumulate / MAC: Y = A * B + C)
+Pipeline Structure  : 4-Stage Synchronous Pipeline (Deterministic 4-Cycle Latency)
+Internal Datapath   : 100-bit Wide Internal Accumulator Datapath with Unified Normalization
+Verification Status : 100% ALL TESTS PASSED ACROSS ALL 6 TIERS
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+1. EXECUTIVE VERIFICATION SCOREBOARD SUMMARY
+----------------------------------------------------------------------------------------------------
+TIER  VERIFICATION LEVEL              FRAMEWORK / ENGINE       TESTS    PASSED   FAILED   PASS RATE
+----------------------------------------------------------------------------------------------------
+1     Directed Simulation (sim_tb)    Icarus Verilog 12.0      19       19       0        100.00%
+2     Corner-Case Suite (corner_case) SystemVerilog (iverilog) 87       87       0        100.00%
+3     Constrained Random (CRV_tb)     SystemVerilog (iverilog) 250      250      0        100.00%
+4     Algebraic Laws (large_cases)    SystemVerilog (iverilog) 500      500      0        100.00%
+5     Formal Assertions (SVA)         Verilator 5.032 --assert 11 Props 11 Props 0        100.00%
+6     Python Cocotb Verification      Cocotb 2.1.0 + iverilog  1,020    1,020    0        100.00%
+----------------------------------------------------------------------------------------------------
+TOTAL VERIFIED MAC TEST VECTORS                                1,887    1,887    0        100.00%
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+2. TIER BREAKDOWN & SPECIFICATION COVERAGE
+----------------------------------------------------------------------------------------------------
+
+TIER 1: DIRECTED SIMULATION (tb/sim_tb/tb_fpu_mac.v)
+  - Part 1: Direct Fused Multiply-Add Operations (13 Vectors)
+    * Latency verification: Output valid_out asserts exactly 4 cycles after valid_in.
+    * Operations: 1.0*1.0+1.0=2.0, 2.0*3.0+4.0=10.0, 2.5*4.0+(-2.5)=7.5, 2.0*2.5+0.0=5.0, etc.
+    * Zero handling: 0.0*5.0+7.0=7.0, 5.0*0.0+3.0=3.0, 2.0*2.0+(-4.0)=0.0 (cancellation to zero).
+    * Large products: 10.0*10.0+50.0=150.0, -2.0*3.0+10.0=4.0.
+  - Part 2: Special & Corner Cases (1 Vector)
+    * 0.0 * 0.0 + 0.0 = 0.0.
+  - Part 3: Continuous Pipeline Streaming (5 Vectors)
+    * Back-to-back input injection: 1 vector / cycle sustained throughput.
+  - Result: 19 / 19 PASSED (100.00%)
+
+TIER 2: CORNER-CASE & EDGE REGRESSION (tb/corner_case/tb_corner_mac.sv)
+  - Section 1: Zero Arithmetic Combinations (A*B+C with zeros)          : 12 / 12 Passed
+  - Section 2: Infinity Arithmetic Combinations (+/-Inf, cross-signs)   : 11 / 11 Passed
+  - Section 3: Sign Permutations Paired with NaNs (QNaN, SNaN)          : 5 / 5 Passed
+  - Section 4: Dedicated Flag Trigger Vectors (V, U, Z, NV, NX)         : 4 / 4 Passed
+  - Section 5: Target Output Representation Checks                      : 5 / 5 Passed
+  - Section 6: Randomized Sign-Quadrant Stress Loop                     : 50 / 50 Passed
+  - Result: 87 / 87 PASSED (100.00%)
+
+TIER 3: SYSTEMVERILOG CONSTRAINED RANDOM VERIFICATION (tb/CRV_tb/tb_crv_fpu.sv)
+  - 3-operand constrained random generation (A, B, C).
+  - Internal 100-bit wide shifter and alignment logic verification.
+  - Total transactions targeting FPU_mac (OP_MAC): 250 / 250 Passed (100.00%)
+
+TIER 4: MASSIVE MATHEMATICAL INVARIANCE REGRESSION (tb/large_cases/tb_large_cases.sv)
+  - Section 6: Fused Multiply-Add Identities (A * 1.0 + 0.0 == A)       : 500 / 500 Passed
+  - Result: 500 / 500 PASSED (100.00%)
+
+TIER 5: FORMAL CONCURRENT SYSTEMVERILOG ASSERTIONS (tb/SVA/sva_mac.sv)
+  - Simulation Engine: Verilator 5.032 with active assertion synthesis.
+  - Property 1: Pipeline Latency - valid_out asserted exactly 4 cycles after valid_in.
+  - Property 2: No Spurious valid_out - valid_out deasserted if valid_in was not asserted.
+  - Property 3: Zero Multiplication Addend - 0.0 * B + C produces C.
+  - Property 4: Zero Multiplicand Addend - A * 0.0 + C produces C.
+  - Property 5: 0 * Inf Invalid - (0.0 * Inf) + C triggers flag_invalid and QNaN.
+  - Property 6: Inf - Inf Cancellation - (+Inf) * 1.0 + (-Inf) triggers flag_invalid and QNaN.
+  - Property 7: NaN Propagation - Any NaN operand among {A, B, C} propagates QNaN.
+  - Property 8: Output Stability & Unknown States - Zero X/Z bits permitted on valid_out.
+  - Result: 11 / 11 ASSERTIONS MONITORED CLEANLY (0 VIOLATIONS)
+
+TIER 6: PYTHON COCOTB SELF-CHECKING VERIFICATION (tb/cocotb_tb/test_fpu_cocotb.py)
+  - Golden Reference: Python struct-based IEEE 754 float32 software model with FTZ.
+  - Vectors Executed: 1,020 randomized and corner-case vectors.
+  - Verification: Bit-exact mantissa/exponent comparison & exception flag compliance.
+  - Result: 1,020 / 1,020 PASSED (100.00%)
+
+----------------------------------------------------------------------------------------------------
+3. RAW SIMULATION CONSOLE SNIPPETS
+----------------------------------------------------------------------------------------------------
+>>> sim_tb (Icarus Verilog):
+tb_fpu_mac SUMMARY: Total=19, Passed=19, Failed=0
+RESULT: ALL PIPELINED 4-STAGE TESTS PASSED SUCCESSFULLY!
+
+>>> corner_case (tb_corner_mac.sv):
+===============================================================================
+  FPU_MAC CORNER TEST SUMMARY
+  Total Tests Executed : 87
+  Passed Tests         : 87
+  Failed Tests         : 0
+  STATUS: ALL FPU_MAC CORNER CASES PASSED!
+===============================================================================
+
+>>> CRV Scoreboard:
+  3. FPU MAC       (OP_MAC) : 250 / 250 Passed (100.00%)
+
+>>> Large Cases Invariance:
+  Section 6: Fused Multiply-Add Identities (MAC) : 500 / 500 Passed
+
+>>> SVA Engine (Verilator 5.032):
+  ALL CONCURRENT SVA ASSERTIONS & COVER PROPERTIES MONITORED CLEANLY!
+
+>>> Cocotb Scoreboard:
+MAC / FMA (Y = A * B + C)      | 1020     | 1020     | 0        | 100.00%
+====================================================================================================

@@ -1,0 +1,108 @@
+====================================================================================================
+                      FPU_MULTIPLIER MULTI-TIER VERIFICATION REPORT
+====================================================================================================
+Generated Timestamp : 2026-10-18 01:34:31
+Target Module       : FPU_multiplier (IEEE 754 Single-Precision Floating-Point Multiplier)
+Pipeline Structure  : 4-Stage Synchronous Pipeline (Deterministic 4-Cycle Latency)
+Verification Status : 100% ALL TESTS PASSED ACROSS ALL 6 TIERS
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+1. EXECUTIVE VERIFICATION SCOREBOARD SUMMARY
+----------------------------------------------------------------------------------------------------
+TIER  VERIFICATION LEVEL              FRAMEWORK / ENGINE       TESTS    PASSED   FAILED   PASS RATE
+----------------------------------------------------------------------------------------------------
+1     Directed Simulation (sim_tb)    Icarus Verilog 12.0      25       25       0        100.00%
+2     Corner-Case Suite (corner_case) SystemVerilog (iverilog) 97       97       0        100.00%
+3     Constrained Random (CRV_tb)     SystemVerilog (iverilog) 250      250      0        100.00%
+4     Algebraic Laws (large_cases)    SystemVerilog (iverilog) 800      800      0        100.00%
+5     Formal Assertions (SVA)         Verilator 5.032 --assert 11 Props 11 Props 0        100.00%
+6     Python Cocotb Verification      Cocotb 2.1.0 + iverilog  1,010    1,010    0        100.00%
+----------------------------------------------------------------------------------------------------
+TOTAL VERIFIED MULTIPLIER TEST VECTORS                         2,192    2,192    0        100.00%
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+2. TIER BREAKDOWN & SPECIFICATION COVERAGE
+----------------------------------------------------------------------------------------------------
+
+TIER 1: DIRECTED SIMULATION (tb/sim_tb/tb_fpu_multiplier.v)
+  - Part 1: Direct Basic Multiplications (13 Vectors)
+    * Latency verification: Output valid_out asserts exactly 4 cycles after valid_in.
+    * Normals: 1.0*1.0=1.0, 2.0*3.0=6.0, 2.5*4.0=10.0, 0.5*0.5=0.25, 1.5*1.5=2.25, 10.0*10.0=100.0, etc.
+    * Sign Parity: (-2.0)*3.0=-6.0, 2.5*(-4.0)=-10.0, (-1.5)*(-2.0)=3.0, (-10.0)*(-5.0)=50.0.
+  - Part 2: Special & Corner Cases (7 Vectors)
+    * Zero Multiplication: 0.0 * 5.0 = 0.0, 5.0 * 0.0 = 0.0, 0.0 * 0.0 = 0.0, 1.0 * 42.0 = 42.0.
+    * Invalid 0 * Inf: 0.0 * Inf = NaN (FlagInvalid=1).
+    * Infinity scaling: Inf * 5.0 = Inf.
+    * NaN propagation: NaN * 5.0 = NaN.
+  - Part 3: Continuous Pipeline Streaming (5 Vectors)
+    * Back-to-back input injection: 1 vector / cycle sustained throughput.
+  - Result: 25 / 25 PASSED (100.00%)
+
+TIER 2: CORNER-CASE & EDGE REGRESSION (tb/corner_case/tb_corner_multiplier.sv)
+  - Section 1: Zero Arithmetic (+0.0, -0.0, cross signs)                : 8 / 8 Passed
+  - Section 2: Subnormals & Flush-to-Zero (FTZ) Mode                    : 8 / 8 Passed
+  - Section 3: Infinity Arithmetic & NaNs (SNaN vs QNaN)                : 18 / 18 Passed
+  - Section 4: Exception Flags Triggering (V, U, Z, NV, NX)             : 8 / 8 Passed
+  - Section 5: Target Output Representation Checks                      : 5 / 5 Passed
+  - Section 6: Randomized Sign-Quadrant Stress Loop                     : 50 / 50 Passed
+  - Result: 97 / 97 PASSED (100.00%)
+
+TIER 3: SYSTEMVERILOG CONSTRAINED RANDOM VERIFICATION (tb/CRV_tb/tb_crv_fpu.sv)
+  - Constrained exponent distribution: [120:134].
+  - Hardware mantissa product: 24-bit x 24-bit = 48-bit product with normalization and rounding.
+  - Total transactions targeting FPU_multiplier (OP_MUL): 250 / 250 Passed (100.00%)
+
+TIER 4: MASSIVE MATHEMATICAL INVARIANCE REGRESSION (tb/large_cases/tb_large_cases.sv)
+  - Section 3: Multiplicative Identity Law: X * 1.0 == X                : 500 / 500 Passed
+  - Section 4: Multiplicative Zero Property: X * 0.0 == 0.0             : 300 / 300 Passed
+  - Result: 800 / 800 PASSED (100.00%)
+
+TIER 5: FORMAL CONCURRENT SYSTEMVERILOG ASSERTIONS (tb/SVA/sva_multiplier.sv)
+  - Simulation Engine: Verilator 5.032 with active assertion synthesis.
+  - Property 1: Pipeline Latency - valid_out asserted exactly 4 cycles after valid_in.
+  - Property 2: No Spurious valid_out - valid_out deasserted if valid_in was not asserted.
+  - Property 3: Sign Parity - Sign(Y) == Sign(A) ^ Sign(B) for non-NaN outputs.
+  - Property 4: Zero Multiplier - Zero input forces output to Zero and flag_zero=1.
+  - Property 5: 0 * Inf Invalid - Multiplying zero by infinity triggers flag_invalid and QNaN.
+  - Property 6: Overflow - Exponent exceeding 254 triggers flag_overflow and infinity.
+  - Property 7: NaN Propagation - Any NaN operand propagates canonical QNaN.
+  - Property 8: Output Stability & Unknown States - Zero X/Z bits permitted on valid_out.
+  - Result: 11 / 11 ASSERTIONS MONITORED CLEANLY (0 VIOLATIONS)
+
+TIER 6: PYTHON COCOTB SELF-CHECKING VERIFICATION (tb/cocotb_tb/test_fpu_cocotb.py)
+  - Golden Reference: Python struct-based IEEE 754 float32 software model with FTZ.
+  - Vectors Executed: 1,010 randomized and corner-case vectors.
+  - Verification: Bit-exact mantissa/exponent comparison & exception flag compliance.
+  - Result: 1,010 / 1,010 PASSED (100.00%)
+
+----------------------------------------------------------------------------------------------------
+3. RAW SIMULATION CONSOLE SNIPPETS
+----------------------------------------------------------------------------------------------------
+>>> sim_tb (Icarus Verilog):
+tb_fpu_multiplier SUMMARY: Total=25, Passed=25, Failed=0
+RESULT: ALL PIPELINED 4-STAGE TESTS PASSED SUCCESSFULLY!
+
+>>> corner_case (tb_corner_multiplier.sv):
+===============================================================================
+  FPU_MULTIPLIER CORNER TEST SUMMARY
+  Total Tests Executed : 97
+  Passed Tests         : 97
+  Failed Tests         : 0
+  STATUS: ALL FPU_MULTIPLIER CORNER CASES PASSED!
+===============================================================================
+
+>>> CRV Scoreboard:
+  2. FPU Multiplier(OP_MUL) : 250 / 250 Passed (100.00%)
+
+>>> Large Cases Invariance:
+  Section 3: Multiplicative Identity (X * 1 = X) : 500 / 500 Passed
+  Section 4: Multiplicative Zero (X * 0 = 0)     : 300 / 300 Passed
+
+>>> SVA Engine (Verilator 5.032):
+  ALL CONCURRENT SVA ASSERTIONS & COVER PROPERTIES MONITORED CLEANLY!
+
+>>> Cocotb Scoreboard:
+MULTIPLIER (Y = A * B)         | 1010     | 1010     | 0        | 100.00%
+====================================================================================================

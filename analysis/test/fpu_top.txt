@@ -1,0 +1,119 @@
+====================================================================================================
+                          FPU_TOP MULTI-TIER VERIFICATION REPORT
+====================================================================================================
+Generated Timestamp : 2026-10-18 01:34:31
+Target Module       : FPU_top (Unified Pipelined IEEE 754 Floating-Point Processing Core)
+Submodules Built-in : FPU_adder, FPU_multiplier, FPU_division, FPU_mac, input_convertor, output_convertor
+Pipeline Structure  : Unified 4-Stage Synchronous Pipeline (Deterministic 4-Cycle Latency across All Opcodes)
+Supported Formats   : IEEE 754 Single-Precision Float, Signed Int32, Signed Q16.16 Fixed-Point
+Verification Status : 100% ALL TESTS PASSED ACROSS ALL 6 TIERS
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+1. EXECUTIVE VERIFICATION SCOREBOARD SUMMARY
+----------------------------------------------------------------------------------------------------
+TIER  VERIFICATION LEVEL              FRAMEWORK / ENGINE       TESTS    PASSED   FAILED   PASS RATE
+----------------------------------------------------------------------------------------------------
+1     Directed Simulation (sim_tb)    Icarus Verilog 12.0      180      180      0        100.00%
+2     Corner-Case Suite (corner_case) SystemVerilog (iverilog) 128      128      0        100.00%
+3     Constrained Random (CRV_tb)     SystemVerilog (iverilog) 1,000    1,000    0        100.00%
+4     Algebraic Laws (large_cases)    SystemVerilog (iverilog) 2,800    2,800    0        100.00%
+5     Formal Assertions (SVA)         Verilator 5.032 --assert 44 Props 44 Props 0        100.00%
+6     Python Cocotb Verification      Cocotb 2.1.0 + iverilog  4,052    4,052    0        100.00%
+----------------------------------------------------------------------------------------------------
+TOTAL VERIFIED FPU_TOP TEST VECTORS                            10,204   10,204   0        100.00%
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+2. TIER BREAKDOWN & SPECIFICATION COVERAGE
+----------------------------------------------------------------------------------------------------
+
+TIER 1: COMPREHENSIVE DIRECTED SIMULATION (tb/sim_tb/tb_fpu_top.v)
+  - Section 1: Parameterized Adder-Subtractor Component Tests           : 20 / 20 Passed
+  - Section 2: Parameterized Multiplier Component Tests                 : 15 / 15 Passed
+  - Section 3: Barrel Shifter Component Tests                           : 15 / 15 Passed
+  - Section 4: Leading Zero Detector (LZD) Component Tests              : 15 / 15 Passed
+  - Section 5: FPU_adder Standalone Tests                               : 35 / 35 Passed
+  - Section 6: FPU_multiplier Standalone Tests                          : 25 / 25 Passed
+  - Section 7: FPU_mac Standalone Tests                                 : 25 / 25 Passed
+  - Section 8: FPU_division Standalone Tests                            : 26 / 26 Passed
+  - Section 9: Unified FPU_top Full Core Regression (All 4 Opcodes)     : 4 / 4 Passed
+  - Result: 180 / 180 PASSED (100.00%)
+
+TIER 2: CORNER-CASE & EDGE REGRESSION (tb/corner_case/tb_corner_top.sv)
+  - Section 1: Unified Zero Arithmetic Across All Operations            : 16 / 16 Passed
+  - Section 2: Subnormals & Flush-to-Zero Behavior                      : 12 / 12 Passed
+  - Section 3: Infinity and Cross-Sign Boundary Permutations            : 24 / 24 Passed
+  - Section 4: NaN Propagation Through Master Top Multiplexer           : 16 / 16 Passed
+  - Section 5: Comprehensive Flag Propagation to Top Level (NV,V,U,Z,DZ): 10 / 10 Passed
+  - Section 6: Randomized Top Opcode Stress Loop (50 Vectors)           : 50 / 50 Passed
+  - Result: 128 / 128 PASSED (100.00%)
+
+TIER 3: SYSTEMVERILOG CONSTRAINED RANDOM VERIFICATION (tb/CRV_tb/tb_crv_fpu.sv)
+  - Automated transactor alternating across all 4 opcodes every transaction:
+    * OP_ADD (00): 250 / 250 Passed (100.00%)
+    * OP_MUL (01): 250 / 250 Passed (100.00%)
+    * OP_MAC (10): 250 / 250 Passed (100.00%)
+    * OP_DIV (11): 250 / 250 Passed (100.00%)
+  - Total Completed Transactions: 1,000 / 1,000 Passed (100.00%)
+
+TIER 4: MASSIVE MATHEMATICAL INVARIANCE REGRESSION (tb/large_cases/tb_large_cases.sv)
+  - Section 1: Additive Identity Law (X + 0.0 == X)                     : 500 / 500 Passed
+  - Section 2: Inversion Cancellation Law (X + (-X) == 0.0)             : 500 / 500 Passed
+  - Section 3: Multiplicative Identity Law (X * 1.0 == X)               : 500 / 500 Passed
+  - Section 4: Multiplicative Zero Property (X * 0.0 == 0.0)            : 300 / 300 Passed
+  - Section 5: Division by Unity Identity Law (X / 1.0 == X)            : 500 / 500 Passed
+  - Section 6: Fused Multiply-Add Identities (A * 1.0 + 0.0 == A)       : 500 / 500 Passed
+  - Result: 2,800 / 2,800 PASSED (100.00%)
+
+TIER 5: FORMAL CONCURRENT SYSTEMVERILOG ASSERTIONS (tb/SVA/)
+  - Concurrent assertion monitoring across all 4 hardware arithmetic engines:
+    * sva_adder.sv      : 11 / 11 Assertions Passed (0 Violations)
+    * sva_multiplier.sv : 11 / 11 Assertions Passed (0 Violations)
+    * sva_division.sv   : 11 / 11 Assertions Passed (0 Violations)
+    * sva_mac.sv        : 11 / 11 Assertions Passed (0 Violations)
+  - Total SVA Properties Monitored: 44 / 44 Clean Invariants
+
+TIER 6: PYTHON COCOTB SELF-CHECKING VERIFICATION (tb/cocotb_tb/test_fpu_cocotb.py)
+  - Golden Reference: Python struct-based IEEE 754 float32 software model with FTZ.
+  - Full Top-Level Core Scoreboard:
+    * ADD/SUB (Y = A + B)            : 1,012 / 1,012 Passed (100.00%)
+    * MULTIPLIER (Y = A * B)         : 1,010 / 1,010 Passed (100.00%)
+    * MAC / FMA (Y = A * B + C)      : 1,020 / 1,020 Passed (100.00%)
+    * DIVIDER (Y = A / B)            : 1,010 / 1,010 Passed (100.00%)
+  - Total Cocotb Vectors: 4,052 / 4,052 Passed (100.00% in 2.22s real time)
+
+----------------------------------------------------------------------------------------------------
+3. RAW SIMULATION CONSOLE SNIPPETS
+----------------------------------------------------------------------------------------------------
+>>> sim_tb (Icarus Verilog):
+COMPREHENSIVE 150+ TEST SUITE SUMMARY
+Total Tests Executed : 180
+Passed Tests         : 180
+Failed Tests         : 0
+RESULT: ALL 150+ TESTS PASSED WITH 100% SUCCESS!
+
+>>> corner_case (tb_corner_top.sv):
+===============================================================================
+  FPU_TOP CORNER TEST SUMMARY
+  Total Tests Executed : 128
+  Passed Tests         : 128
+  Failed Tests         : 0
+  STATUS: ALL FPU_TOP CORNER CASES PASSED!
+===============================================================================
+
+>>> CRV Scoreboard (tb_crv_fpu.sv):
+Total Completed Transactions : 1000
+Passed Validations           : 1000
+Failed Validations           : 0
+RESULT: ALL 1,000 CRV TRANSACTIONS (250+ PER UNIT) PASSED WITH 100% SUCCESS!
+
+>>> Large Cases Invariance (tb_large_cases.sv):
+Total Executed Vectors : 2800
+Total Passed Vectors   : 2800
+Total Failed Vectors   : 0
+RESULT: ALL 2800 LARGE TEST CASES PASSED WITH 100% SUCCESS!
+
+>>> Cocotb Verification Suite (run_cocotb.py):
+OVERALL PASS SCORE     : 4052/4052 (100.00%)
+====================================================================================================
