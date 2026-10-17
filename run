@@ -81,11 +81,17 @@ case "$TARGET" in
         RTL="rtl/FPU_top.v rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v component/input_convertor.v component/output_convertor.v component/param_adder_sub.v component/param_multiplier.v component/barrel_shifter.v component/leading_zero_detector.v"
         TB="tb/sim_tb/tb_fpu_top.v"
         VCD="waveform_fpu_top.vcd"
-        MOD_NAME="FPU Full Suite Regression (150+ Tests)"
+        MOD_NAME="FPU Full Suite Regression (180+ Tests)"
+        ;;
+    crv|tb_crv_fpu|tb_crv)
+        RTL="rtl/FPU_top.v rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v component/param_adder_sub.v component/param_multiplier.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/CRV_tb/tb_crv_fpu.v"
+        VCD="waveform_crv.vcd"
+        MOD_NAME="Constrained Random Verification CRV (1,000 Iterations / 250+ Per Unit)"
         ;;
     *)
         echo "Error: Unknown target '$1'!"
-        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top"
+        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv"
         exit 1
         ;;
 esac
