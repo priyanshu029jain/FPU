@@ -600,26 +600,35 @@ The verification environment is partitioned into four complementary, non-overlap
    - 497 corner cases executed across all 5 testbenches, 100% PASS.
 
 5. **Tier 5 — SystemVerilog Assertions (SVA) Formal Verification Suite (`SVA`)**:
-   - Location: `tb/SVA/sva_adder.sv` (IEEE 1800 SystemVerilog concurrent assertions).
-   - Module: `sva_adder` (standalone self-checking checker module instantiating `FPU_adder` DUT).
+   - Locations:
+     * `tb/SVA/sva_adder.sv` (FPU Adder SVA Checker)
+     * `tb/SVA/sva_multiplier.sv` (FPU Multiplier SVA Checker)
+     * `tb/SVA/sva_division.sv` (FPU Divider SVA Checker)
+     * `tb/SVA/sva_mac.sv` (FPU Fused Multiply-Accumulate SVA Checker)
+   - Modules: `sva_adder`, `sva_multiplier`, `sva_division`, `sva_mac` (standalone self-checking checker modules instantiating respective DUTs).
    - Engine: Executed with Verilator concurrent assertion engine (`verilator --binary --timing --assert --trace`).
    - Every property is protected against asynchronous reset transients using `disable iff (!rst_n)`.
-   - Verified 7 distinct assertion and cover property categories:
+   - Verified 7 distinct assertion and cover property categories per module:
      * **Property 1 (Pipeline Latency)**: Asserts that `valid_out` pulses high exactly 4 clock cycles after `valid_in` assertion (`$past(valid_in, 4) |-> valid_out`).
      * **Property 2 (No Premature `valid_out`)**: Ensures no spurious assertion of `valid_out` occurs before the 4-cycle pipeline latency has elapsed (`valid_out |-> $past(valid_in, 4)`).
-     * **Property 3 (Result Stability)**: Asserts that once `valid_out` is high, result $Y$ remains stable across any cycle where pipeline inputs are held static.
+     * **Property 3 (Result Stability)**: Asserts that once `valid_out` is high, result $Y$ remains stable across any cycle where pipeline inputs were held static 4 cycles prior.
      * **Property 4 (No Unknowns)**: Asserts that output $Y$ is completely free of high-impedance (`Z`) or uninitialized (`X`) bits whenever `valid_out` is high (`!$isunknown(Y)`).
      * **Property 5 (IEEE-754 Special Cases)**:
-       - **5A (NaN Propagation)**: If input $A$ or $B$ is NaN, output $Y$ must be NaN (`(is_nan(A) || is_nan(B)) |-> is_nan(Y)`).
-       - **5B (Inf Opposite Signs)**: $+ \infty + (-\infty)$ or $-\infty + (+\infty)$ must trigger an invalid operation and output NaN.
-       - **5C (Zero Addition)**: Any combination of $+0.0$ and $-0.0$ addition must produce a zero result ($Y \in \{+0.0, -0.0\}$) with `flag_zero` asserted.
+       - **5A (NaN Propagation)**: If any input is NaN, output $Y$ must be NaN.
+       - **5B (Invalid Operations)**: Opposite-sign infinity additions, $0 \times \infty$, $0/0$, $\infty/\infty$ must trigger NaN and assert `flag_invalid`.
+       - **5C (Zero Operations)**: Zero additions, $0 \times X$, $0 / X$ must produce zero with `flag_zero` asserted.
+       - **5D (Division by Zero)**: $X / 0$ must produce $\pm\infty$ with `flag_div_by_zero` asserted.
+       - **5E (Sign Parity)**: Multiplier and Divider outputs satisfy $S_y = S_a \oplus S_b$ for non-NaN, non-zero results.
+       - **5F (Fused MAC Identities)**: $A \times B + 0 = A \times B$, $0 \times B + C = C$.
      * **Property 6 (Exception Flags Consistency)**:
        - **6A (Overflow)**: When `flag_overflow` is asserted, output exponent must be `8'd255` (saturated to infinity).
        - **6B (Underflow)**: When `flag_underflow` is asserted, output exponent must be `8'd0` (flushed to zero).
        - **6C (Invalid Operation)**: When `flag_invalid` is asserted, output $Y$ must be NaN.
-     * **Property 7 (Functional Correctness)**: Asserts that output $Y$ exactly matches golden double-precision IEEE 754 reference model `ref_model(A, B)` for normalized operations.
-   - SVA Cover Properties (`cov_latency`, `cov_nan_prop`, `cov_inf_opposite`, `cov_zero_add`, `cov_overflow`, `cov_invalid`, `cov_functional`, etc.) provide comprehensive functional coverage tracking.
-   - 100% PASS with 0 assertion failures.
+       - **6D (Div-by-Zero)**: When `flag_div_by_zero` is asserted, output must be Infinity.
+       - **6E (Zero Flag)**: When `flag_zero` is asserted, output must be zero.
+     * **Property 7 (Functional Correctness)**: Asserts that output $Y$ exactly matches golden double-precision IEEE 754 reference model functions (`ref_model`) for normalized operations.
+   - SVA Cover Properties across all 4 modules provide comprehensive functional coverage tracking.
+   - 100% PASS with 0 assertion failures across all 4 modules.
 
 
 ---
@@ -663,7 +672,10 @@ A single script `run` (or `bash run.sh`) runs the complete automated flow:
 ./run corner_top         # 128 unified top-level corner tests
 
 # SystemVerilog Assertions (SVA) Checker Suite (Tier 5: SVA)
-./run sva_adder          # Standalone SVA checker with 11 concurrent assertions
+./run sva_adder          # SVA checker for FPU Adder (11 concurrent assertions)
+./run sva_multiplier     # SVA checker for FPU Multiplier (12 concurrent assertions)
+./run sva_division       # SVA checker for FPU Divider (13 concurrent assertions)
+./run sva_mac            # SVA checker for FPU MAC (11 concurrent assertions)
 
 ```
 

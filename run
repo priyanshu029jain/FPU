@@ -125,15 +125,33 @@ case "$TARGET" in
         VCD="waveform_corner_top.vcd"
         MOD_NAME="Corner-Case Regression: Unified FPU Top (IEEE 754)"
         ;;
-    sva_adder|svaadder|sva)
+    sva_adder|svaadder)
         RTL="rtl/FPU_adder.v component/param_adder_sub.v component/barrel_shifter.v component/leading_zero_detector.v"
         TB="tb/SVA/sva_adder.sv"
         VCD="waveform_sva_adder.vcd"
         MOD_NAME="SystemVerilog Assertions (SVA) Checker: FPU Adder"
         ;;
+    sva_multiplier|svamultiplier|sva_mul)
+        RTL="rtl/FPU_multiplier.v component/param_multiplier.v component/param_adder_sub.v component/barrel_shifter.v"
+        TB="tb/SVA/sva_multiplier.sv"
+        VCD="waveform_sva_multiplier.vcd"
+        MOD_NAME="SystemVerilog Assertions (SVA) Checker: FPU Multiplier"
+        ;;
+    sva_division|svadivision|sva_div)
+        RTL="rtl/FPU_division.v component/param_adder_sub.v component/barrel_shifter.v"
+        TB="tb/SVA/sva_division.sv"
+        VCD="waveform_sva_division.vcd"
+        MOD_NAME="SystemVerilog Assertions (SVA) Checker: FPU Divider"
+        ;;
+    sva_mac|svamac)
+        RTL="rtl/FPU_mac.v component/param_multiplier.v component/param_adder_sub.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/SVA/sva_mac.sv"
+        VCD="waveform_sva_mac.vcd"
+        MOD_NAME="SystemVerilog Assertions (SVA) Checker: FPU MAC"
+        ;;
     *)
         echo "Error: Unknown target '$1'!"
-        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv, large, corner_adder, corner_multiplier, corner_division, corner_mac, corner_top, sva_adder"
+        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top, crv, large, corner_adder, corner_multiplier, corner_division, corner_mac, corner_top, sva_adder, sva_multiplier, sva_division, sva_mac"
         exit 1
         ;;
 esac
