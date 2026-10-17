@@ -118,8 +118,9 @@ package fpu_crv_pkg;
         endfunction
 
         function void check_transaction(fpu_transaction tr, int iter);
-            bit check_ok = 1'b1;
+            bit check_ok;
             logic [31:0] cur_a, cur_b, cur_y;
+            check_ok = 1'b1;
 
             cur_a = tr.A;
             cur_b = tr.B;
@@ -243,6 +244,7 @@ module tb_crv_fpu;
     fpu_transaction tr;
     fpu_scoreboard  sb;
     int i;
+    bit unused_rnd;
 
     initial begin
         $dumpfile("waveform_crv.vcd");
@@ -272,7 +274,7 @@ module tb_crv_fpu;
 
         // 1,000 Random Transactions
         for (i = 0; i < 1000; i++) begin
-            void'(tr.randomize_constrained(i));
+            unused_rnd = tr.randomize_constrained(i);
 
             // Drive inputs on negative clock edge for clean setup
             @(negedge clk);
