@@ -12,3 +12,5 @@ sim_crv.vvp
 sim_large.vvp
 obj_dir/
 synth/
+script/*_mapped.v
+script/*_report*.txt
