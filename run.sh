@@ -59,9 +59,33 @@ case "$TARGET" in
         VCD="waveform_fpu_adder.vcd"
         MOD_NAME="Modular FPU Adder (IEEE 754)"
         ;;
+    fpu_multiplier|fpumultiplier|fpumul)
+        RTL="rtl/FPU_multiplier.v component/param_multiplier.v component/param_adder_sub.v component/barrel_shifter.v"
+        TB="tb/sim_tb/tb_fpu_multiplier.v"
+        VCD="waveform_fpu_multiplier.vcd"
+        MOD_NAME="Modular FPU Multiplier (IEEE 754)"
+        ;;
+    fpu_division|fpudivision|fpudiv|div)
+        RTL="rtl/FPU_division.v component/param_adder_sub.v component/barrel_shifter.v"
+        TB="tb/sim_tb/tb_fpu_division.v"
+        VCD="waveform_fpu_division.vcd"
+        MOD_NAME="Modular FPU Divider (IEEE 754)"
+        ;;
+    fpu_mac|fpumac|mac)
+        RTL="rtl/FPU_mac.v component/param_multiplier.v component/param_adder_sub.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/sim_tb/tb_fpu_mac.v"
+        VCD="waveform_fpu_mac.vcd"
+        MOD_NAME="Modular FPU MAC / FMA (IEEE 754)"
+        ;;
+    top|fpu_top|all)
+        RTL="rtl/FPU_top.v rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v component/input_convertor.v component/output_convertor.v component/param_adder_sub.v component/param_multiplier.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/sim_tb/tb_fpu_top.v"
+        VCD="waveform_fpu_top.vcd"
+        MOD_NAME="FPU Full Suite Regression (150+ Tests)"
+        ;;
     *)
         echo "Error: Unknown target '$1'!"
-        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder"
+        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder, fpu_multiplier, fpu_division, fpu_mac, top"
         exit 1
         ;;
 esac
