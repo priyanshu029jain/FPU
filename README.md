@@ -1,309 +1,332 @@
-# 32-Bit IEEE 754-2008 Pipelined Floating-Point Unit (FPU)
+# 32-Bit IEEE 754 Pipelined Floating-Point Unit (FPU)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Verilator](https://img.shields.io/badge/Linter-Verilator_5.032-orange.svg)](https://www.veripool.org/verilator/)
 [![Icarus Verilog](https://img.shields.io/badge/Simulator-Icarus_Verilog_12.0-blueviolet.svg)](http://iverilog.icarus.com/)
 [![Synthesis](https://img.shields.io/badge/Synthesis-Yosys_0.52-yellow.svg)](https://yosyshq.net/yosys/)
-[![STA](https://img.shields.io/badge/STA-OpenSTA_2.0-brightgreen.svg)](https://github.com/The-OpenROAD-Project/OpenSTA)
+[![STA](https://img.shields.io/badge/STA-OpenSTA-brightgreen.svg)](https://github.com/The-OpenROAD-Project/OpenSTA)
 [![PDK](https://img.shields.io/badge/PDK-SkyWater_130nm-red.svg)](https://github.com/google/skywater-pdk)
 
-A production-grade, fully pipelined, high-throughput **32-bit Single-Precision Floating-Point Arithmetic Coprocessor** compliant with the **IEEE 754-2008 standard**, implemented in synthesizable Verilog HDL.
+A pipelined **32-bit single-precision floating-point unit** in synthesizable Verilog, supporting add/subtract, multiply, divide and fused multiply-add (FMA) with Round-to-Nearest-Even rounding and IEEE-style status flags. The project also contains a multi-tier verification suite and an open-source ASIC flow (Yosys + OpenSTA on SkyWater 130nm).
 
-Designed for high-performance computing, digital signal processing (DSP), graphics processing units (GPUs), and neural network acceleration, this FPU core provides single-cycle throughput across addition, subtraction, multiplication, division, and fused multiply-accumulate (FMA) operations with full exception flagging and Round-to-Nearest-Even (RNE) Guard-Round-Sticky (GRS) rounding.
+This is a learning / portfolio project, not a fully IEEE 754-compliant production core. The [Known Limitations](#-known-limitations) and [Verification Status](#-verification-status-claimed-vs-measured) sections below document exactly where the design deviates from the standard, based on a re-run of every test and synthesis script plus an independent bit-exact audit (2026-10-18).
 
 ---
 
 ## 📑 Table of Contents
-1. [Architectural Overview & Core Features](#-architectural-overview--core-features)
-2. [IEEE 754-2008 Arithmetic Foundations](#-ieee-754-2008-arithmetic-foundations)
-3. [4-Stage Synchronous Pipeline Architecture](#-4-stage-synchronous-pipeline-architecture)
-4. [Module Directory & Hierarchy](#-module-directory--hierarchy)
-5. [Multi-Tier Verification & Test Suite](#-multi-tier-verification--test-suite)
-6. [ASIC Physical Synthesis & Benchmarks (SkyWater 130nm)](#-asic-physical-synthesis--benchmarks-skywater-130nm)
-7. [Getting Started & Quick-Run Guide](#-getting-started--quick-run-guide)
-8. [Documentation Links](#-documentation-links)
+1. [At a Glance](#-at-a-glance)
+2. [Architecture](#-architecture)
+3. [Module Directory](#-module-directory)
+4. [Verification Status (Claimed vs. Measured)](#-verification-status-claimed-vs-measured)
+5. [Known Limitations](#-known-limitations)
+6. [ASIC Synthesis Results (SkyWater 130nm)](#-asic-synthesis-results-skywater-130nm)
+7. [Getting Started](#-getting-started)
+8. [Documentation](#-documentation)
 9. [License](#-license)
 
 ---
 
-## 🚀 Architectural Overview & Core Features
+## ✅ At a Glance
 
-- **Standard Compliance**: Fully compliant with **IEEE 754-2008 Single-Precision Float** format ($1\text{ sign bit}$, $8\text{ exponent bits}$, $23\text{ mantissa bits}$, $1\text{ implicit bit}$).
-- **Fully Pipelined Architecture**:
-  - **4-Stage Synchronous Pipeline** across all functional units (`FPU_adder`, `FPU_multiplier`, `FPU_division`, `FPU_mac`).
-  - **Single-Cycle Throughput**: 1 operation issued per clock cycle (Initiation Interval $= 1$).
-  - **Deterministic Latency**: Fixed 4 clock cycle output latency with pipelined `valid_out` strobes.
-- **Arithmetic Engines Supported**:
-  1. **Floating-Point Adder / Subtractor (`FPU_adder`)**: $Y = A \pm B$ with dynamic exponent equalization and 27-bit CLA addition.
-  2. **Floating-Point Multiplier (`FPU_multiplier`)**: $Y = A \times B$ with $24 \times 24$ carry-save multiplier array and 48-bit CPA.
-  3. **Floating-Point Divider (`FPU_division`)**: $Y = A \div B$ with 26-stage restoring quotient engine and remainder tracking.
-  4. **Fused Multiply-Accumulate / MAC (`FPU_mac`)**: $Y = (A \times B) + C$ with 100-bit dual-path alignment and single-step final rounding (prevents double-rounding error).
-  5. **Unified Top-Level Coprocessor (`FPU_top`)**: Opcode-directed execution routing with integrated data format conversion.
-- **Numerical Robustness & Exception Handling**:
-  - Full support for **Normal Numbers**, **Subnormals / Denormals**, **Signed Zeros ($\pm 0.0$)**, **Infinities ($\pm \infty$)**, and **NaNs (Quiet and Signaling)**.
-  - Complete 6-flag IEEE 754 status output: `flag_zero`, `flag_inf`, `flag_nan`, `flag_invalid`, `flag_overflow`, `flag_underflow`, `flag_div_by_zero`, `flag_inexact`.
-- **Integrated Data Format Converters**:
-  - `input_convertor.v`: Signed 32-bit Integer / Q16.16 Fixed-Point $\rightarrow$ IEEE 754 Float.
-  - `output_convertor.v`: IEEE 754 Float $\rightarrow$ Signed 32-bit Integer / Q16.16 Fixed-Point with saturation clipping.
+| Aspect | Status |
+|---|---|
+| Operations | ADD/SUB, MUL, DIV, FMA (`Y = A*B + C`, single rounding) selected by a 2-bit opcode |
+| Pipeline | 4 register stages for every op: `valid_out` rises on the 4th rising edge counting the edge that captures the input. **1 op/cycle** throughput, including back-to-back mixed opcodes (verified) |
+| Rounding | Round-to-Nearest-Even only (no other IEEE rounding modes) |
+| Normal inputs → normal results | **Bit-exact** for ADD, MUL, DIV in independent audit; FMA has a large-exponent-gap bug (see limitations) |
+| Subnormals | **Not supported.** Subnormal results are flushed to zero; subnormal inputs can produce wrong results |
+| Special values | ±0, ±∞, NaN handled; canonical qNaN `0x7FC00000` output |
+| Flags | zero, inf, nan, invalid, overflow, underflow, inexact, div-by-zero |
+| Timing @ 100 MHz (Sky130, pre-layout) | Adder **meets**; multiplier misses by 0.38 ns; MAC and divider miss by a wide margin |
+| Full `FPU_top` f<sub>max</sub> | **~9.95 MHz** (min period 100.5 ns; 9.45 MHz with `timing.sdc`), limited by the divider |
+| Formal verification | **None.** Assertions are checked in simulation only (no `.sby` / SymbiYosys files) |
 
 ---
 
-## 🔬 IEEE 754-2008 Arithmetic Foundations
+## 🏗️ Architecture
 
-A standard single-precision floating-point number is partitioned into three fields:
+### Number format
+IEEE 754 binary32: 1 sign bit, 8-bit biased exponent (bias 127), 23-bit fraction, implicit leading 1 for normal numbers:
 
-$$\text{Bit 31: Sign } S \quad | \quad \text{Bits 30--23: Biased Exponent } E \ (8\text{ bits}) \quad | \quad \text{Bits 22--0: Fraction/Mantissa } M \ (23\text{ bits})$$
+$$V = (-1)^S \times 2^{E - 127} \times (1.M)$$
 
-### Value Formulation
-$$V = (-1)^S \times 2^{E - 127} \times (1.M) = (-1)^S \times 2^{E - 127} \times \left(1 + \sum_{i=1}^{23} b_{23-i} 2^{-i}\right)$$
+Rounding uses Guard/Round/Sticky bits with the RNE increment rule $G \land (L \lor R \lor S)$, where $L$ is the result LSB.
 
-| Component | Width | Description |
-|---|:---:|---|
-| **Sign ($S$)** | 1 bit | `0` for positive ($+$), `1` for negative ($-$). |
-| **Exponent ($E$)** | 8 bits | Biased by $+127$ (`8'h7F`). True exponent $e = E - 127$. |
-| **Mantissa ($M$)** | 23 bits | Fractional significand. Implicit leading $1.$ restored for normalized values. |
+### Top level: [`FPU_top`](rtl/FPU_top.v)
 
-### Special Values Representation
-- **$+0.0$ / $-0.0$**: $E = 0$, $M = 0$ (`0x00000000` / `0x80000000`).
-- **$+\infty$ / $-\infty$**: $E = 255$, $M = 0$ (`0x7F800000` / `0xFF800000`).
-- **Quiet NaN (QNaN)**: $E = 255$, $M[22] = 1$ (canonical `0x7FC00000`).
-- **Signaling NaN (SNaN)**: $E = 255$, $M[22] = 0, M[21:0] \ne 0$.
+| `op` | Operation | Unit |
+|:---:|---|---|
+| `00` | `Y = A + B` (subtraction via operand sign) | [`FPU_adder`](rtl/FPU_adder.v) |
+| `01` | `Y = A * B` | [`FPU_multiplier`](rtl/FPU_multiplier.v) |
+| `10` | `Y = A * B + C` (fused, single rounding) | [`FPU_mac`](rtl/FPU_mac.v) |
+| `11` | `Y = A / B` | [`FPU_division`](rtl/FPU_division.v) |
 
-### Guard, Round, Sticky (GRS) & Round-to-Nearest-Even (RNE)
-To eliminate precision loss during intermediate arithmetic, three extra bits are tracked beyond the 24-bit significand:
+All four units are instantiated in parallel. `valid_in` is gated by the opcode, the opcode is delayed through a 4-deep shift register, and a combinational multiplexer selects the matching unit's result and flags. `flag_inf` / `flag_nan` are derived from the final `Y`. Note that because the units run in parallel, the slowest unit (the divider) sets the clock period of `FPU_top`.
 
-$$\text{Significand [23:0]} \quad | \quad \text{Guard (G: } 2^{-1}\text{)} \quad | \quad \text{Round (R: } 2^{-2}\text{)} \quad | \quad \text{Sticky (S: } \bigvee_{k=-\infty}^{-3} b_k\text{)}$$
-
-$$\text{RNE Increment Condition} = G \land (L \lor R \lor S) \quad \text{where } L = \text{Significand}[0]$$
-
----
-
-## 🏗️ 4-Stage Synchronous Pipeline Architecture
-
-All functional arithmetic units implement a consistent 4-stage hardware pipeline with synchronous boundary registers clocked on `posedge clk` and active-low asynchronous reset `rst_n`:
+### 4-stage pipeline (common structure)
 
 ```
-                 STAGE 1                 STAGE 2                 STAGE 3                 STAGE 4
-            +---------------+       +---------------+       +---------------+       +---------------+
-            | Unpack, Decode|       | Core Mantissa |       | Normalization |       | RNE Rounding, |
- Inputs --->| Align & Shift |==r1==>| Math Engine   |==r2==>| LZD & Shifter |==r3==>| Pack & Flags  |---> Outputs
-            | param_adder_s |       | param_mul/add |       | LZD & shifter |       | param_adder_s |
-            +---------------+       +---------------+       +---------------+       +---------------+
-                  clk                     clk                     clk                     clk
+          STAGE 1                 STAGE 2                 STAGE 3                 STAGE 4
+     +---------------+       +---------------+       +---------------+       +---------------+
+     | Unpack, detect|       | Core mantissa |       | Normalize     |       | RNE round,    |
+A,B->| specials,     |==r1==>| operation     |==r2==>| (LZD + shift),|==r3==>| pack, flags   |==> Y, flags
+(C)  | align / exp   |       |               |       | exponent adj. |       | (registered)  |
+     +---------------+       +---------------+       +---------------+       +---------------+
 ```
 
-| Pipeline Stage | Functions & Hardware Executed | Primary Instantiations |
-|---|---|---|
-| **Stage 1: Unpack & Align** | Unpack sign/exp/mantissa, special case detection ($\pm 0, \pm\infty, \text{NaN}$), exponent difference $\Delta E = E_A - E_B$, right alignment barrel shift, sticky bit extraction. | [`param_adder_sub`](component/param_adder_sub.v)<br>[`barrel_shifter`](component/barrel_shifter.v) |
-| **Stage 2: Core Arithmetic** | 28-bit significand addition/subtraction (`FPU_adder`), $24 \times 24$ carry-save product array (`FPU_multiplier`), 26-step restoring division (`FPU_division`), or 100-bit wide accumulation (`FPU_mac`). | [`param_multiplier`](component/param_multiplier.v)<br>[`param_adder_sub`](component/param_adder_sub.v) |
-| **Stage 3: Normalization & GRS** | Leading Zero Detector (LZD) tree evaluation, left normalizer barrel shift (subtractive cancellation), right shift on carry overflow, exponent update, GRS bit extraction. | [`leading_zero_detector`](component/leading_zero_detector.v)<br>[`barrel_shifter`](component/barrel_shifter.v) |
-| **Stage 4: Rounding & Packaging** | Compute RNE increment $G \land (L \lor R \lor S)$, round incrementer adder, post-rounding overflow normalization, underflow/overflow check, float packing $\{S, E, M\}$, assert exception flags. | [`param_adder_sub`](component/param_adder_sub.v) |
+| Unit | Stage 1 | Stage 2 | Stage 3 | Stage 4 |
+|---|---|---|---|---|
+| Adder | Unpack, exponent compare, 49-bit alignment shift + sticky | 27-bit add/sub, LZD | Normalization shift, exponent adjust | RNE round, pack, flags |
+| Multiplier | Unpack, specials, exponent add | 24×24 multiply | 1-bit normalize, GRS extraction | RNE round, pack, flags |
+| Divider | Unpack, exponent subtract | **All 26 restoring-division iterations (combinational loop)** | Normalize, GRS | RNE round, pack, flags |
+| FMA | Unpack, 24×24 multiply, product exponent | 100-bit alignment of product / addend | 100-bit add/sub, LZD | 100-bit normalize, round, pack |
+
+Special operands (NaN, ∞, 0) are detected in Stage 1 and carried down the pipeline as a bypass value that replaces the computed result in Stage 4.
+
+**Implementation note:** arithmetic is written behaviourally (`*`, `+`, `>>`, priority loops). There are no hand-built carry-save, CLA, Wallace or tree-LZD structures; the gate-level structure is whatever Yosys/ABC infers.
 
 ---
 
-## 📂 Module Directory & Hierarchy
+## 📂 Module Directory
 
 ```
 floating_point_unit/
-├── rtl/                                # Core synthesizable 4-stage arithmetic units
-│   ├── FPU_top.v                       # Unified coprocessor top-level (Opcode router)
-│   ├── FPU_adder.v                     # 4-stage IEEE 754 adder/subtractor
-│   ├── FPU_multiplier.v                # 4-stage IEEE 754 multiplier
-│   ├── FPU_division.v                  # 4-stage IEEE 754 divider
-│   └── FPU_mac.v                       # 4-stage IEEE 754 Fused Multiply-Accumulate
-├── component/                          # Parameterized foundational building blocks
-│   ├── param_adder_sub.v               # Generic-width adder/subtractor with overflow & carry
-│   ├── param_multiplier.v              # Generic-width unsigned multiplier
-│   ├── barrel_shifter.v                # Logarithmic bidirectional barrel shifter
-│   ├── leading_zero_detector.v         # Tree-structured priority leading zero detector
-│   ├── input_convertor.v               # Int32 / Q16.16 Fixed-Point -> Float converter
-│   └── output_convertor.v              # Float -> Int32 / Q16.16 Fixed-Point converter
-├── tb/                                 # Multi-tier verification infrastructure
-│   ├── sim_tb/                         # Tier 1: Unit & component functional testbenches
-│   ├── CRV_tb/                         # Tier 2: Constrained Random Verification (1,000 cases)
-│   ├── large_cases/                    # Tier 3: Massive regression suite (2,800+ vectors)
-│   ├── corner_case/                    # Tier 4: Edge-case & IEEE 754 boundary testbenches
-│   ├── SVA/                            # Tier 5: Formal SystemVerilog Assertions checkers
-│   └── cocotb_tb/                      # Tier 6: Python Cocotb Co-simulation (4,000+ vectors)
-├── script/                             # ASIC synthesis & Static Timing Analysis scripts
-│   ├── synth_yosys.tcl                 # Generic top synthesis script (Yosys)
-│   ├── synth_fpu_*.tcl                 # Unit-specific Yosys synthesis scripts
-│   ├── sta.tcl                         # Generic OpenSTA timing script
-│   ├── sta_fpu_*.tcl                   # Unit-specific OpenSTA timing & power scripts
-│   ├── timing.sdc                      # Synopsys Design Constraints (SDC) file
-│   └── run_synth.sh                    # Automated shell flow for synthesis + STA
-├── analysis/                           # Characterization and synthesis reports
-│   ├── asic/                           # SkyWater 130nm ASIC reports (area, timing, power)
-│   │   ├── asic_analysis.md            # Comprehensive silicon analysis report
-│   │   ├── fpu_*_area.txt              # Standard cell gate counts and area reports
-│   │   ├── fpu_*_timing.txt            # Critical path delays and slack reports
-│   │   └── fpu_*_power.txt             # Sequential, combinational & leakage power reports
-│   └── FPGA/                           # FPGA synthesis & resource analysis
-├── documantation/                      # In-depth architectural specifications per module
-├── history.md                          # Exhaustive engineering log & failure post-mortems
-├── notes.pdf                           # Original handwritten mathematical derivations
-├── run.sh                              # Unified verification, simulation & synthesis CLI
-└── sky130.lib                          # SkyWater 130nm standard cell Liberty library
+├── rtl/                      # 4-stage arithmetic units + top level
+│   ├── FPU_top.v             # Opcode router / output mux
+│   ├── FPU_adder.v           # Adder / subtractor
+│   ├── FPU_multiplier.v      # Multiplier
+│   ├── FPU_division.v        # Divider (restoring, single-stage iteration loop)
+│   └── FPU_mac.v             # Fused multiply-add
+├── component/                # Parameterized building blocks
+│   ├── param_adder_sub.v     # N-bit add/sub with carry and signed overflow
+│   ├── param_multiplier.v    # Signed/unsigned multiplier
+│   ├── barrel_shifter.v      # Left/right, logical/arithmetic shifter with sticky output
+│   ├── leading_zero_detector.v
+│   ├── input_convertor.v     # Int32 / Q16.16 -> float  (standalone, NOT instantiated in FPU_top)
+│   └── output_convertor.v    # float -> Int32 / Q16.16  (standalone, NOT instantiated in FPU_top)
+├── tb/
+│   ├── sim_tb/               # Tier 1: unit/component directed tests
+│   ├── CRV_tb/               # Tier 2: random stimulus with property checks
+│   ├── large_cases/          # Tier 3: identity-law regression (2,800 vectors)
+│   ├── corner_case/          # Tier 4: per-unit corner cases
+│   ├── SVA/                  # Tier 5: simulation-time SystemVerilog assertions (Verilator)
+│   └── cocotb_tb/            # Tier 6: Python cocotb regression (4,052 vectors)
+├── script/                   # Yosys synthesis + OpenSTA timing/power scripts, SDC
+├── analysis/
+│   ├── asic/                 # Generated area / timing / power reports
+│   ├── test/                 # Saved test logs
+│   └── FPGA/                 # Xilinx 7-series resource counts (Yosys synth_xilinx)
+├── documantation/            # Per-module specifications
+├── history.md                # Engineering log and bug post-mortems
+├── notes.pdf                 # Handwritten derivations
+├── run.sh / run              # Simulation / synthesis launcher
+└── sky130.lib                # Sky130 HD Liberty (tt_025C_1v80)
 ```
 
 ---
 
-## 🧪 Multi-Tier Verification & Test Suite
+## 🧪 Verification Status (Claimed vs. Measured)
 
-The verification strategy follows a multi-tier pyramid ensuring 100% functional correctness across standard operations, subnormals, infinities, NaNs, and algebraic corner cases:
+Everything below was re-run on 2026-10-18 (Icarus Verilog 12.0, Verilator 5.032, cocotb 2.1, Yosys 0.52, OpenSTA).
 
-```
-                  ▲
-                 / \     Tier 6: Python Cocotb Co-simulation (4,000+ Vectors & Scoreboard)
-                /   \    Tier 5: SystemVerilog Assertions (SVA Concurrent Checkers)
-               /     \   Tier 4: Dedicated Corner-Case Suites (tb_corner_*.sv)
-              /       \  Tier 3: Algebraic Invariance Suites (2,800+ Vectors)
-             /         \ Tier 2: Constrained Random Verification (CRV 1,000 Trans.)
-            /___________\Tier 1: Unit & Component Regressions (180+ Vectors)
-```
+### 1. Project test suites: all pass, all lint clean
 
-| Verification Tier | Testbench | Vectors | Features Verified |
-|---|---|:---:|---|
-| **Tier 1: Unit Tests** | `tb/sim_tb/tb_*.v` | 180+ | Arithmetic truth tables, shifter widths, LZD encodings, basic float cases. |
-| **Tier 2: CRV** | `tb/CRV_tb/tb_crv_fpu.sv` | 1,000 | Object-oriented SV class generator with subnormal/normal distributions and randomized hazards. |
-| **Tier 3: Invariance** | `tb/large_cases/tb_large_cases.sv` | 2,800+ | Algebraic identities: identity ($A+0, A\times 1$), commutativity ($A+B = B+A$), zero annihilation ($A\times 0$), sign symmetry. |
-| **Tier 4: Corner Cases** | `tb/corner_case/tb_corner_*.sv` | 400+ | Overflow boundaries ($E=254 \rightarrow 255$), underflow boundaries ($E=1 \rightarrow 0$), subnormal rounding, exact tie even roundings. |
-| **Tier 5: SVA Assertions** | `tb/SVA/sva_*.sv` | 47 Checkers | Formal protocol & math assertions running concurrently in Verilator (`--assert`). |
-| **Tier 6: Cocotb Python** | `tb/cocotb_tb/test_fpu_cocotb.py` | **4,052** | Python co-simulation with `math.fma` golden reference model, ULP tolerance, and self-checking scoreboard (**100% Pass**). |
+| Tier | Testbench | Result |
+|---|---|---|
+| 1 | `tb_adder` / `tb_multiplier` / `tb_barrel_shifter` / `tb_LZD` | 64/64, 63/63, 62/62, 91/91 |
+| 1 | `tb_fpu_adder` / `_multiplier` / `_division` / `_mac` | 36/36, 25/25, 24/24, 19/19 |
+| 1 | `tb_fpu_top` (incl. converters) | 180/180 |
+| 2 | `tb_crv_fpu` | 1,000/1,000 |
+| 3 | `tb_large_cases` | 2,800/2,800 |
+| 4 | `tb_corner_{adder,multiplier,division,mac,top}` | 93, 97, 92, 87, 128, all passing |
+| 5 | `sva_{adder,multiplier,division,mac}` | 48 assertions (11/12/14/11), no assertion failures |
+| 6 | `test_fpu_cocotb` | 4,052/4,052 |
+
+Verilator `--lint-only -Wall` is clean on every testbench configuration.
+
+### 2. What those suites actually check
+
+A 100% pass rate is only as strong as the checks behind it:
+
+| Tier | What it really verifies | Gap |
+|---|---|---|
+| 1 & 4 | Directed vectors with exact expected values (zeros, ∞, NaN, flags, random sign quadrants) | Corner suites contain **no subnormal cases**; `tb_corner_adder` test #14 expects `+0 + −0 = −0`, encoding the sign-of-zero bug |
+| 2 CRV | Random operands (exponents 120-134) checked **only** for: no X on `Y`, sign of MUL/DIV, `flag_zero` consistent with `Y` | **No golden model: numerical correctness is not checked.** Uses `$urandom`, not the SV constraint solver |
+| 3 Large | X+0=X, X+(−X)=0, X·1=X, X·0=0, X/1=X, FMA identities | Mostly exercises the special-case bypass path. No commutativity test (despite earlier claims) |
+| 5 SVA | Concurrent assertions on latency, valid, flags, special cases; ~10 stimulus vectors per unit | Simulation only, **not formal verification** (no SymbiYosys/formal tool is run) |
+| 6 cocotb | Random operands (exponents ~115-135) vs Python float reference | Accepts **±1 ULP**, accepts **any zero for any sign**, checks only zero/nan/inf flags, fixed seed, one op every ~5 cycles (no back-to-back streaming) |
+
+### 3. Independent bit-exact audit
+
+To test the claims the suites cannot, an extra cocotb bench was run against `FPU_top` using an **exact rational reference** (Python `Fraction`, correct RNE + subnormals; itself cross-checked against 597k host-float results). It requires **bit-exact** results (any NaN accepted for NaN), streams **one operation every cycle with random mixed opcodes**, and covers the full exponent range.
+
+**Pipeline depth and throughput:**
+
+| Check | Result |
+|---|---|
+| Latency, single op (ADD / MUL / FMA / DIV) | Identical for all four: `valid_out` rises **3 rising edges after the edge that samples `valid_in`** (4 register stages) ✅ |
+| 32 same-op issues on consecutive cycles, for each op | 32 results on 32 consecutive cycles (`valid_out` never drops), identical to one-at-a-time issue ✅ |
+| Repeating ADD→MUL→FMA→DIV, one per cycle | 16/16 results in order, identical to one-at-a-time issue ✅ |
+| 20,000 random mixed-opcode ops, one per cycle | All returned in order with constant latency ✅ |
+
+**Normal inputs only, full exponent range (12,000 ops):**
+
+| Op | Bit-exact | Failures |
+|---|:---:|---|
+| ADD | **3000/3000 (100%)** | none |
+| MUL | 2890/3000 | 110: result should be subnormal, got 0 |
+| DIV | 2860/3000 | 140: result should be subnormal, got 0 |
+| FMA | 2981/3000 | 19: **wrong value** when product exponent is far (> ~48) below C's |
+
+**Mixed stimulus (20,000 ops: normal, full-range, tiny, huge, cancellation, raw bit patterns):** 93.2% bit-exact, 5.2% subnormal-flushed-to-zero, 1.6% wrong value (subnormal operands and the FMA bug). Overflow and div-by-zero flags were correct on every correctly computed result; the inexact flag was correct on all normal-only cases.
+
+**Directed IEEE checks:**
+
+| Case | Expected | Got |
+|---|---|---|
+| `+0 + −0` | `+0` (`00000000`) | `−0` (`80000000`) ❌ |
+| `−0 + +0`, `−0 + −0`, `1 + −1`, `fma(+0,1,−0)` | per IEEE | correct ✅ |
+| `0x00000001 + 0x00000001` | `0x00000002` | `0x00000000`, `flag_underflow=1` (flush-to-zero) ❌ |
+| `0x00800000 * 0x3F000000` (min normal × 0.5) | `0x00400000` | `0x00000000`, `flag_underflow=1` (flush-to-zero) ❌ |
+| `0x00800000 / 2.0`, `fma(0x00800000, 0.5, +0)`, `0x00000001 * 1.0` | subnormal | `0x00000000` (flush-to-zero) ❌ |
+| `0x00400000 * 2.0` (subnormal in, normal out) | `0x00800000` | `0x00C00000`: **wrong value** ❌ |
+| `qNaN + 1` | `invalid = 0` | `invalid = 1` ❌ |
+
+**Formal verification:** the repository contains no `.sby` files and no SymbiYosys or other formal-tool setup. The SVA properties are only evaluated during simulation (`verilator --binary --assert`), so they cover only the stimulus the SVA testbenches drive.
 
 ---
 
-## ⚡ ASIC Physical Synthesis & Benchmarks (SkyWater 130nm)
+## ⚠️ Known Limitations
 
-All modules have been synthesized to gate-level netlists using **Yosys** and timed using **OpenSTA** with the **SkyWater 130nm High-Density Library (`sky130_fd_sc_hd__tt_025C_1v80`, $V_{DD} = 1.80\text{V}$, $T = 25^\circ\text{C}$)**.
-
-*Reference: Sky130 NAND2 standard cell (`sky130_fd_sc_hd__nand2_1`) area $= 3.31\ \mu\text{m}^2 \equiv 1\text{ Gate Equivalent (GE)}$.*
-
-### 1. Area & Gate Equivalent (GE) Breakdown
-
-| Module | Cell Count | Total Area ($\mu\text{m}^2$) | Sequential Area ($\mu\text{m}^2$) | Seq Area % | Gate Count ($\approx\text{GE}$) | Netlist |
-|---|:---:|:---:|:---:|:---:|:---:|---|
-| **`FPU_adder`** | 1,693 | 15,564.93 | 7,181.89 | 46.14% | ~4,702 GE | [`fpu_adder_area.txt`](analysis/asic/fpu_adder_area.txt) |
-| **`FPU_multiplier`** | 3,467 | 26,536.70 | 5,330.11 | 20.09% | ~8,017 GE | [`fpu_multiplier_area.txt`](analysis/asic/fpu_multiplier_area.txt) |
-| **`FPU_division`** | 12,813 | 69,484.14 | 4,904.70 | 7.06% | ~20,992 GE | [`fpu_division_area.txt`](analysis/asic/fpu_division_area.txt) |
-| **`FPU_mac`** | 11,171 | 70,857.96 | 13,663.10 | 19.28% | ~21,407 GE | [`fpu_mac_area.txt`](analysis/asic/fpu_mac_area.txt) |
-| **`FPU_top` Core** | **29,927** | **182,328.62** | **29,928.70** | **16.41%** | **~55,084 GE** | [`fpu_top_area.txt`](analysis/asic/fpu_top_area.txt) |
-
-### 2. Static Timing Analysis (STA) Critical Path Summary
-*Target Clock Period: $10.00\text{ ns}$ ($100.0\text{ MHz}$)*
-
-| Module | Critical Path Arrival ($T_{\text{arr}}$) | Worst Setup Slack (WNS) | Timing Status | Max Frequency ($f_{\max}$) | Report File |
-|---|:---:|:---:|:---:|:---:|---|
-| **`FPU_adder`** | 8.83 ns | **+1.04 ns** | **MET** | **111.6 MHz** | [`fpu_adder_timing.txt`](analysis/asic/fpu_adder_timing.txt) |
-| **`FPU_multiplier`** | 9.38 ns | **+0.48 ns** | **MET** | **105.1 MHz** | [`fpu_multiplier_timing.txt`](analysis/asic/fpu_multiplier_timing.txt) |
-| **`FPU_mac`** | 29.27 ns | **-19.42 ns** | VIOLATED | **~34.0 MHz** | [`fpu_mac_timing.txt`](analysis/asic/fpu_mac_timing.txt) |
-| **`FPU_division`** | 99.55 ns | **-89.69 ns** | VIOLATED | **~10.0 MHz** | [`fpu_division_timing.txt`](analysis/asic/fpu_division_timing.txt) |
-| **`FPU_top`** | 100.37 ns | **-90.51 ns** | VIOLATED | **~9.95 MHz** | [`fpu_top_timing.txt`](analysis/asic/fpu_top_timing.txt) |
-
-### 3. Power Consumption Breakdown (OpenSTA)
-
-| Module | Sequential Power | Combinational Power | Leakage Power | Total Power | Report File |
-|---|:---:|:---:|:---:|:---:|---|
-| **`FPU_adder`** | $8.59 \times 10^{-5}\text{ W}$ | $5.46 \times 10^{-4}\text{ W}$ | $6.43 \times 10^{-9}\text{ W}$ | **0.632 mW** | [`fpu_adder_power.txt`](analysis/asic/fpu_adder_power.txt) |
-| **`FPU_multiplier`** | $1.49 \times 10^{-4}\text{ W}$ | $1.45 \times 10^{-3}\text{ W}$ | $1.03 \times 10^{-8}\text{ W}$ | **1.60 mW** | [`fpu_multiplier_power.txt`](analysis/asic/fpu_multiplier_power.txt) |
-| **`FPU_mac`** | $6.46 \times 10^{-4}\text{ W}$ | $8.13 \times 10^{-3}\text{ W}$ | $2.84 \times 10^{-8}\text{ W}$ | **8.78 mW** | [`fpu_mac_power.txt`](analysis/asic/fpu_mac_power.txt) |
-| **`FPU_division`** | $4.02 \times 10^{2}\text{ W}$ | $2.92 \times 10^{5}\text{ W}$ | $2.57 \times 10^{-8}\text{ W}$ | Dynamic Switched | [`fpu_division_power.txt`](analysis/asic/fpu_division_power.txt) |
-| **`FPU_top`** | $3.93 \times 10^{2}\text{ W}$ | $2.83 \times 10^{5}\text{ W}$ | $7.08 \times 10^{-8}\text{ W}$ | Core Dynamic | [`fpu_top_power.txt`](analysis/asic/fpu_top_power.txt) |
-
-### 4. Silicon Die Area Estimations Across Fabrication Nodes
-- **SkyWater 130nm HD** ($1\text{ GE} \approx 3.31\ \mu\text{m}^2$): $\text{Total Die Area} \approx 0.182\text{ mm}^2$
-- **TSMC 65nm LP** ($1\text{ GE} \approx 1.44\ \mu\text{m}^2$): $\text{Estimated Die Area} \approx 0.079\text{ mm}^2$
-- **TSMC 28nm HPC+** ($1\text{ GE} \approx 0.28\ \mu\text{m}^2$): $\text{Estimated Die Area} \approx 0.015\text{ mm}^2$
+1. **No subnormal results (flush-to-zero).** Any result with biased exponent 0 is output as ±0 and `flag_underflow` is raised. This affects all four units.
+2. **Subnormal inputs are not handled correctly.** The units treat a subnormal's exponent field as 0 rather than the effective exponent 1 and do not normalize the significand, so `subnormal ⊕ normal` can return a wrong value (e.g. ADD `00540245 + 01A4B37C` → `01AF33C5`, expected `01B9B40D`).
+3. **FMA alignment bug for large exponent gaps.** In [`FPU_mac.v`](rtl/FPU_mac.v) the absolute exponent difference `s2_abs_diff` is only 8 bits wide while the signed difference can exceed ±255, so it wraps. Example: `A=9B4E99D0, B=13D13455, C=7AAC7742` should return `C` exactly but returns `7AAC773F`.
+4. **`+0 + −0` returns `−0`.** The adder's zero bypass returns `B` when `A` is zero; IEEE RNE requires `+0`.
+5. **`flag_invalid` is raised for quiet NaN inputs.** IEEE only signals invalid for signaling NaNs and invalid operations (∞−∞, 0·∞, 0/0, ∞/∞).
+6. **Round-to-Nearest-Even only.** No RTZ / RUP / RDN modes.
+7. **Divider is not truly pipelined.** All 26 restoring iterations sit in one combinational stage (a ~100 ns path in Sky130), which limits `FPU_top` to ~10 MHz. MAC similarly concentrates a 100-bit normalize + round in one stage.
+8. **Converters are standalone and do not round.** `input_convertor` / `output_convertor` are tested in `tb_fpu_top.v` but are not connected to `FPU_top`'s datapath.
+   - `input_convertor` truncates integers wider than 24 bits (`0x7FFFFFFF` → `0x4EFFFFFF`; RNE gives `0x4F000000`).
+   - `output_convertor` truncates toward zero and saturates negative overflow to `0x80000001` rather than INT_MIN. It also flags the exactly representable −2³¹ as overflow.
 
 ---
 
-## 🛠️ Getting Started & Quick-Run Guide
+## ⚡ ASIC Synthesis Results (SkyWater 130nm)
 
-A unified, self-documenting executable launcher script [`run.sh`](run.sh) (aliased as `./run`) automates linting, compilation, simulation, waveform viewing, and synthesis.
+Flow: Yosys 0.52 (`synth_fpu_*.tcl`) → OpenSTA (`sta_fpu_*.tcl`) using `sky130_fd_sc_hd__tt_025C_1v80`. All numbers below were reproduced exactly by re-running the scripts.
+
+**Caveats:** these are **pre-layout, synthesis-only** results (no placement, routing or wire parasitics). The per-unit STA scripts use a plain 10 ns clock with zero I/O delay and **do not load [`timing.sdc`](script/timing.sdc)** (no clock uncertainty or derating), and ABC is run without a delay target, so timing is optimistic. `timing.sdc` itself is not OpenSTA-compatible as written: it uses the Synopsys-only command `remove_from_collection`, so its input-delay and driving-cell lines fail. OpenSTA's equivalent is `delete_from_list`.
+
+### Area
+Gate equivalents use the Sky130 `nand2_1` area from the bundled Liberty file, **3.7536 µm²**.
+
+| Module | Cells | Flip-flops | Area (µm²) | Sequential area | ≈ GE |
+|---|:---:|:---:|:---:|:---:|:---:|
+| `FPU_adder` | 1,693 | 287 | 15,564.9 | 46.1% | ~4,150 |
+| `FPU_multiplier` | 3,291 | 213 | 26,536.7 | 20.1% | ~7,070 |
+| `FPU_division` | 12,813 | 196 | 69,484.1 | 7.1% | ~18,510 |
+| `FPU_mac` | 11,171 | 546 | 70,858.0 | 19.3% | ~18,880 |
+| **`FPU_top`** | **29,927** | **1,196** | **182,328.6** | 16.4% | **~48,570** |
+
+### Timing (10 ns target, 100 MHz)
+
+| Module | Data arrival | Worst setup slack | Status | ≈ f<sub>max</sub> |
+|---|:---:|:---:|:---:|:---:|
+| `FPU_adder` | 8.83 ns | **+1.04 ns** | MET | ~112 MHz |
+| `FPU_multiplier` | 10.24 ns | **−0.38 ns** | VIOLATED | ~96 MHz |
+| `FPU_mac` | 29.27 ns | −19.42 ns | VIOLATED | ~34 MHz |
+| `FPU_division` | 99.55 ns | −89.69 ns | VIOLATED | ~10 MHz |
+| `FPU_top` | 100.37 ns | −90.51 ns | VIOLATED | ~10 MHz |
+
+### Full-FPU maximum frequency
+OpenSTA clock-period sweep (binary search to 1 ps) on the synthesized **`FPU_top`** netlist, reporting the smallest period with worst setup slack ≥ 0:
+
+| Constraints | Min period | f<sub>max</sub> | WNS at 10 ns |
+|---|:---:|:---:|:---:|
+| As in `sta_fpu_top.tcl` (plain clock, 0 ns I/O delay) | **100.506 ns** | **9.95 MHz** | −90.51 ns |
+| `timing.sdc` (with `delete_from_list` fix: 250 ps uncertainty, 15% I/O delay, ±5% derate) | **105.789 ns** | **9.45 MHz** | −95.79 ns |
+
+The top level is limited by the divider's single-stage iteration loop (the divider alone needs ~99.7 ns). The adder alone could run at ~112 MHz.
+
+### Power
+[`analysis/asic/fpu_*_power.txt`](analysis/asic/) are OpenSTA `report_power` outputs with **default switching activity** (no VCD/SAIF) and **zero internal power** reported. They are not meaningful power estimates. The adder (0.63 mW), multiplier (1.6 mW) and MAC (8.8 mW) figures are at best rough switching-power indications. The divider and top-level reports (~2.9×10⁵ W) are clearly invalid and should be ignored.
+
+### FPGA
+Yosys `synth_xilinx -family xc7` (logic synthesis only; no Vivado place-and-route, so **no FPGA timing**). Details are in [`analysis/FPGA/fpga_analysis.md`](analysis/FPGA/fpga_analysis.md), which replaces earlier hand estimates.
+
+| Module | LUTs | FFs | DSP48E1 | CARRY4 |
+|---|:---:|:---:|:---:|:---:|
+| `FPU_adder` | 765 | 287 | 0 | 30 |
+| `FPU_multiplier` | 143 | 213 | 2 | 19 |
+| `FPU_mac` | 2,032 | 546 | 2 | 59 |
+| `FPU_division` | 3,069 | 196 | 0 | 338 |
+| **`FPU_top`** | **5,945** | **1,196** | **4** | **443** |
+
+`FPU_top` uses ~29% of the LUTs on an Artix-7 XC7A35T.
+
+---
+
+## 🛠️ Getting Started
 
 ### Prerequisites
-Make sure the required EDA tools are installed and in your `PATH`:
-- **Simulator**: [Icarus Verilog](http://iverilog.icarus.com/) (`iverilog`, `vvp`)
-- **Linter & Assertions**: [Verilator](https://www.veripool.org/verilator/) (`verilator`)
-- **Waveform Viewer**: [GTKWave](http://gtkwave.sourceforge.net/) (`gtkwave`)
-- **Synthesis & STA**: [Yosys](https://yosyshq.net/yosys/) & [OpenSTA](https://github.com/The-OpenROAD-Project/OpenSTA)
+- [Icarus Verilog](http://iverilog.icarus.com/) ≥ 12 (`iverilog`, `vvp`)
+- [Verilator](https://www.veripool.org/verilator/) ≥ 5 (lint + SVA runs)
+- [cocotb](https://www.cocotb.org/) 2.x + Python 3 (Tier 6)
+- [Yosys](https://yosyshq.net/yosys/) + [OpenSTA](https://github.com/The-OpenROAD-Project/OpenSTA) (synthesis/STA)
+- [GTKWave](http://gtkwave.sourceforge.net/) (optional; `run.sh` opens it after each simulation)
 
----
-
-### Verification Commands
+### Simulation
 
 ```bash
-# -----------------------------------------------------------------------------
-# Tier 1: Foundational Subcomponents & Unit Testbenches
-# -----------------------------------------------------------------------------
-./run adder              # Parameterized Adder/Subtractor testbench
-./run multiplier         # Parameterized Multiplier testbench
-./run barrel_shifter     # Parameterized Barrel Shifter testbench
-./run LZD                # Leading Zero Detector testbench
-./run fpu_adder          # FPU Adder unit testbench
-./run fpu_multiplier     # FPU Multiplier unit testbench
-./run fpu_division       # FPU Divider unit testbench
-./run fpu_mac            # FPU MAC unit testbench
-./run top                # Complete FPU top regression suite (180+ tests)
+# Tier 1: components and units
+./run adder | multiplier | barrel_shifter | LZD
+./run fpu_adder | fpu_multiplier | fpu_division | fpu_mac
+./run top                # 180-test FPU_top + converter regression
 
-# -----------------------------------------------------------------------------
-# Tier 2 & 3: Constrained Random & Large Invariance Regression
-# -----------------------------------------------------------------------------
-./run crv                # SystemVerilog CRV (1,000 automated transactions)
-./run large              # Massive algebraic invariance suite (2,800+ vectors)
+# Tiers 2-4
+./run crv                # 1,000 random transactions (property checks only)
+./run large              # 2,800 identity-law vectors
+./run corner_adder | corner_multiplier | corner_division | corner_mac | corner_top
 
-# -----------------------------------------------------------------------------
-# Tier 4: Edge & Corner-Case Regressions
-# -----------------------------------------------------------------------------
-./run corner_adder       # Corner-case suite: Adder
-./run corner_multiplier  # Corner-case suite: Multiplier
-./run corner_division    # Corner-case suite: Divider
-./run corner_mac         # Corner-case suite: MAC
-./run corner_top         # Corner-case suite: Unified Top
+# Tier 5: simulation-time SVA (Verilator --assert)
+./run sva_adder | sva_multiplier | sva_division | sva_mac
 
-# -----------------------------------------------------------------------------
-# Tier 5: SystemVerilog Assertions (SVA) Formal Property Checkers
-# -----------------------------------------------------------------------------
-./run sva_adder          # Concurrent SVA checker: Adder (11 assertions)
-./run sva_multiplier     # Concurrent SVA checker: Multiplier (12 assertions)
-./run sva_division       # Concurrent SVA checker: Divider (13 assertions)
-./run sva_mac            # Concurrent SVA checker: MAC (11 assertions)
-
-# -----------------------------------------------------------------------------
-# Tier 6: Python Cocotb Co-simulation & Scoreboard (4,000+ Vectors)
-# -----------------------------------------------------------------------------
-./run cocotb             # Runs 4,052 automated tests with self-checking scoreboard
+# Tier 6: cocotb
+./run cocotb
 ```
 
----
-
-### ASIC Synthesis & STA Commands
+### Synthesis + STA
 
 ```bash
-# Synthesize top-level coprocessor at 100 MHz (Yosys + OpenSTA)
-./run synth top
-
-# Synthesize individual execution units at specific clock frequencies
-./run synth adder 5.0        # Synthesizes FPU_adder @ 200 MHz (5.0 ns period)
-./run synth multiplier 10.0  # Synthesizes FPU_multiplier @ 100 MHz
-./run synth division 10.0    # Synthesizes FPU_division
-./run synth mac 10.0         # Synthesizes FPU_mac
+./run synth top              # FPU_top @ 10 ns
+./run synth adder 5.0        # FPU_adder @ 5 ns
+./run synth multiplier       # also: division, mac
 ```
+
+The unit-specific scripts can also be run directly, e.g. `yosys -s script/synth_fpu_adder.tcl && sta script/sta_fpu_adder.tcl`. These write the reports in `analysis/asic/`.
 
 ---
 
-## 📖 Documentation Links
+## 🗺️ Suggested Next Steps
+- Implement gradual underflow (subnormal results) and normalize subnormal inputs (effective exponent 1 + LZD pre-shift).
+- Widen `s2_abs_diff` in `FPU_mac.v` and saturate the shift amount from the full 10-bit difference.
+- Fix the `+0 + −0` sign rule and restrict `flag_invalid` to sNaN / invalid operations.
+- Pipeline the divider across multiple stages (or use SRT radix-4 / Newton-Raphson) and rebalance the MAC stages.
+- Add a bit-exact golden model (e.g. Berkeley SoftFloat or exact rational arithmetic) to the CRV and cocotb tiers, and remove the ±1 ULP tolerance.
+- Replace `remove_from_collection` with `delete_from_list` in `timing.sdc`, load it in the STA scripts, and generate power from simulation activity (VCD/SAIF).
+- Add a SymbiYosys (`.sby`) setup if the SVA properties are meant to be formally proven.
 
-- **Exhaustive Engineering Log & Post-Mortem Analysis**: [`history.md`](history.md)
-  - Detailed technical analyses of all bugs encountered (signed overflow vs unsigned carry, subtractive cancellation underflow, GRS sticky extraction, pipeline alignment hazards).
-- **Silicon Implementation Analysis**: [`analysis/asic/asic_analysis.md`](analysis/asic/asic_analysis.md)
-  - Full Gate Equivalent counts, critical path stage breakdowns, and power optimization strategies (Operand Isolation and Multiplier Sharing).
-- **Module Specification Deep-Dives**: [`documantation/`](documantation/)
-  - Dedicated architecture specs for all 11 RTL files and subcomponents.
-- **Handwritten Mathematical Derivations & Diagrams**: [`notes.pdf`](notes.pdf)
+---
+
+## 📖 Documentation
+- [`history.md`](history.md): engineering log and bug post-mortems (signed overflow vs carry, LZD/carry race, testbench races, Icarus parser issues, …).
+- [`analysis/asic/asic_analysis.md`](analysis/asic/asic_analysis.md): Sky130 area, timing (including the full-FPU f<sub>max</sub> sweep) and power-report assessment.
+- [`analysis/FPGA/fpga_analysis.md`](analysis/FPGA/fpga_analysis.md): Xilinx 7-series resource counts.
+- [`analysis/test/`](analysis/test/): per-unit verification reports, each with an independent bit-exact audit section.
+- [`documantation/`](documantation/): per-module specifications.
+- [`notes.pdf`](notes.pdf): handwritten derivations referenced by the RTL comments.
 
 ---
 
 ## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)

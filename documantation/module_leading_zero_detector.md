@@ -4,10 +4,10 @@
 
 ## 1. Overview & Architectural Role
 
-`leading_zero_detector` (LZD) is a parameterized, synthesizable priority encoder that counts the number of consecutive zero bits starting from the Most Significant Bit (MSB) until the first `1` is encountered.
+`leading_zero_detector` (LZD) is a parameterized, synthesizable priority encoder (a behavioural `for` loop, not a tree structure) that counts the number of consecutive zero bits starting from the Most Significant Bit (MSB) until the first `1` is encountered.
 
 ### Role in FPU Modules:
-- **`FPU_adder`**: When subtracting two near-equal floating-point numbers ($A - B$ where $E_A \approx E_B$), catastrophic cancellation occurs, resulting in multiple leading zeros. The LZD determines the exact left-shift distance required to restore the implicit leading `1.0` in Stage 3.
+- **`FPU_adder`**: When subtracting two near-equal floating-point numbers ($A - B$ where $E_A \approx E_B$), catastrophic cancellation occurs, resulting in multiple leading zeros. The LZD determines the exact left-shift distance required to restore the implicit leading `1.0`. The LZD runs in Stage 2; the shift is applied in Stage 3.
 - **`FPU_mac`**: Scans the 100-bit wide intermediate accumulation result to detect cancellation and restore normalized alignment.
 
 Source file: [`component/leading_zero_detector.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/component/leading_zero_detector.v)  
@@ -19,12 +19,12 @@ Testbench: [`tb/sim_tb/tb_LZD.v`](file:///c:/Users/LENOVO/Documents/GitHub/float
 
 ```verilog
 module leading_zero_detector #(
-    parameter WIDTH = 32,
-    parameter CNT_W = $clog2(WIDTH + 1)
+    parameter WIDTH       = 32,
+    parameter COUNT_WIDTH = 5
 )(
-    input  wire [WIDTH-1:0] data_in,   // Input data vector
-    output reg  [CNT_W-1:0] zero_count,// Number of leading zeros
-    output reg              all_zeros  // Set high if data_in is completely 0
+    input  wire [WIDTH-1:0]       in_vector,  // Input data vector
+    output reg  [COUNT_WIDTH-1:0] zero_count, // Number of leading zeros
+    output reg                    all_zeros   // Set high if in_vector is completely 0
 );
 ```
 
@@ -32,9 +32,9 @@ module leading_zero_detector #(
 
 | Port | Width | Direction | Description |
 | :--- | :---: | :---: | :--- |
-| `data_in` | `WIDTH` | Input | Input vector to be scanned from MSB down to LSB. |
-| `zero_count` | `CNT_W` | Output | Count of leading zeros ($0 \le \text{zero\_count} \le \text{WIDTH}$). |
-| `all_zeros` | 1 | Output | Asserted `1'b1` if `data_in == {WIDTH{1'b0}}`. |
+| `in_vector` | `WIDTH` | Input | Input vector to be scanned from MSB down to LSB. |
+| `zero_count` | `COUNT_WIDTH` | Output | Count of leading zeros ($0 \le \text{zero\_count} \le \text{WIDTH}$). `COUNT_WIDTH` must be at least $\lceil\log_2(\text{WIDTH}+1)\rceil$; with the **default** parameters (32, 5) an all-zero input wraps to `zero_count = 0`. The RTL instances use safe values (27/5 in `FPU_adder`, 100/7 in `FPU_mac`) and `tb_LZD.v` uses 32/6. |
+| `all_zeros` | 1 | Output | Asserted `1'b1` if `in_vector == {WIDTH{1'b0}}`. |
 
 ---
 
@@ -44,14 +44,14 @@ module leading_zero_detector #(
 The scanning logic executes sequentially from MSB ($\text{WIDTH}-1$) down to LSB ($0$):
 
 $$\text{zero\_count} = \begin{cases} 
-0 & \text{if } data\_in[\text{WIDTH}-1] = 1 \\
-1 & \text{if } data\_in[\text{WIDTH}-1] = 0 \land data\_in[\text{WIDTH}-2] = 1 \\
-k & \text{if } \left(\bigwedge_{j=1}^{k} \overline{data\_in[\text{WIDTH}-j]}\right) \land data\_in[\text{WIDTH}-1-k] = 1 \\
-\text{WIDTH} & \text{if } data\_in = 0 
+0 & \text{if } in\_vector[\text{WIDTH}-1] = 1 \\
+1 & \text{if } in\_vector[\text{WIDTH}-1] = 0 \land in\_vector[\text{WIDTH}-2] = 1 \\
+k & \text{if } \left(\bigwedge_{j=1}^{k} \overline{in\_vector[\text{WIDTH}-j]}\right) \land in\_vector[\text{WIDTH}-1-k] = 1 \\
+\text{WIDTH} & \text{if } in\_vector = 0 
 \end{cases}$$
 
 ### 3.2 All-Zero Flag
-$$\text{all\_zeros} = \overline{\bigvee_{i=0}^{\text{WIDTH}-1} data\_in[i]} = (data\_in == 0)$$
+$$\text{all\_zeros} = \overline{\bigvee_{i=0}^{\text{WIDTH}-1} in\_vector[i]} = (in\_vector == 0)$$
 
 ---
 

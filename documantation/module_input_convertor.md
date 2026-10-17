@@ -4,7 +4,7 @@
 
 ## 1. Overview & Architectural Role
 
-`input_convertor` transforms standard signed binary representations into the IEEE 754-2008 single-precision 32-bit floating-point format. It provides seamless interoperability between integer / fixed-point processors and the floating-point pipeline.
+`input_convertor` transforms standard signed binary representations into the IEEE 754-2008 single-precision 32-bit floating-point format. It is a **standalone** combinational block: it is tested in `tb/sim_tb/tb_fpu_top.v` but is **not instantiated in `FPU_top`**.
 
 ### Supported Conversion Modes:
 1. **Mode 0 (Integer to Float)**: Converts a 32-bit signed two's-complement integer into IEEE 754 single-precision float.
@@ -56,6 +56,15 @@ $$\text{mantissa} = \begin{cases}
 mag[msb\_pos-1 : msb\_pos-23] & \text{if } msb\_pos \ge 23 \\
 mag \ll (23 - msb\_pos) & \text{if } msb\_pos < 23 
 \end{cases}$$
+
+### 3.4.1 Rounding
+When $msb\_pos > 23$ the bits below $msb\_pos - 23$ are simply dropped: the conversion **truncates toward zero** instead of using IEEE Round-to-Nearest-Even. Magnitudes up to $2^{24}$ are exact. Measured examples:
+
+| Input | Output | RNE would give |
+|---|---|---|
+| `16777219` ($2^{24}+3$) | `0x4B800001` | `0x4B800002` |
+| `0x7FFFFFFF` | `0x4EFFFFFF` | `0x4F000000` |
+| `0x80000000` ($-2^{31}$) | `0xCF000000` | `0xCF000000` (exact) |
 
 ### 3.5 Output Assembly
 $$\text{float\_out} = (mag == 0) \ ? \ 32\text{'h00000000} : \{\text{sign}, \text{Exponent}[7:0], \text{mantissa}[22:0]\}$$

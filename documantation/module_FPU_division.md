@@ -4,16 +4,17 @@
 
 ## 1. Overview & Architectural Role
 
-`FPU_division` is a 4-stage synchronous pipelined floating-point divider complying with the IEEE 754-2008 standard. It computes the single-precision quotient of two floating-point numbers:
+`FPU_division` is a 4-stage synchronous pipelined IEEE 754 binary32 divider. It is bit-exact whenever the quotient is a normal number, but it **does not support subnormals** (see [§5](#5-known-limitations-measured)). Its Stage 2 contains the entire 26-iteration division loop as one combinational block, which makes it the slowest unit in the FPU. It computes the single-precision quotient of two floating-point numbers:
 
 $$Y = \frac{A}{B} = \frac{(-1)^{S_A} \cdot 1.M_A \cdot 2^{E_A - 127}}{(-1)^{S_B} \cdot 1.M_B \cdot 2^{E_B - 127}} = (-1)^{S_A \oplus S_B} \cdot \left(\frac{1.M_A}{1.M_B}\right) \cdot 2^{(E_A - E_B + 127) - 127}$$
 
 ### Key Features:
-- **4-Stage Synchronous Pipeline**: Deterministic 4-cycle latency from `valid_in` to `valid_out`.
-- **Sustained Throughput**: Accepts 1 new operation per clock cycle (100% throughput).
-- **Subcomponent Instantiation**: Fully integrates `param_adder_sub` and `barrel_shifter`.
-- **IEEE 754-2008 Exception Handling**: Decomposed flags for `flag_overflow`, `flag_underflow`, `flag_invalid`, `flag_div_by_zero`, `flag_zero`, and `flag_inexact`.
-- **Restoring Division Core**: Computes 26 bits of exact quotient with non-zero remainder evaluation for the GRS Sticky bit.
+- **4-Stage Synchronous Pipeline**: 4 register stages; `valid_out` rises on the 4th rising edge counting the edge that captures the input.
+- **Sustained Throughput**: Accepts 1 new operation per clock cycle (verified with 32 back-to-back operations).
+- **Subcomponent Instantiation**: Uses `param_adder_sub` and `barrel_shifter`.
+- **Status Flags**: `flag_overflow`, `flag_underflow`, `flag_invalid`, `flag_div_by_zero`, `flag_zero`, and `flag_inexact`.
+- **Restoring Division Core**: 26 quotient bits with remainder ≠ 0 used as the Sticky bit. All 26 iterations are unrolled in **one** combinational stage, not spread across the pipeline.
+- **Timing (Sky130, pre-layout)**: ~99.7 ns path, i.e. ~10 MHz. This sets the `FPU_top` clock.
 
 Source file: [`rtl/FPU_division.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/rtl/FPU_division.v)  
 Testbench: [`tb/sim_tb/tb_fpu_division.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/tb/sim_tb/tb_fpu_division.v)
@@ -52,9 +53,9 @@ module FPU_division (
 | `Y` | 32 | Output | 32-bit single-precision floating-point quotient. |
 | `valid_out` | 1 | Output | Asserted 4 clock cycles after `valid_in`. |
 | `flag_div_by_zero`| 1 | Output | Asserted when $B=0$ and $A \ne 0$; output is $\pm\infty$. |
-| `flag_invalid` | 1 | Output | $0.0 / 0.0$, $\infty / \infty$, or NaN operands; output is canonical QNaN. |
+| `flag_invalid` | 1 | Output | $0.0 / 0.0$, $\infty / \infty$, or any NaN operand (quiet or signaling); output is canonical QNaN. |
 | `flag_overflow` | 1 | Output | Exponent $\ge 255$; output saturates to $\pm\infty$. |
-| `flag_underflow` | 1 | Output | Exponent $\le 0$; underflow detected. |
+| `flag_underflow` | 1 | Output | Exponent $\le 0$; the result is **flushed to ±0** (no subnormal output). |
 | `flag_zero` | 1 | Output | Dividend $A = 0$ ($B \ne 0$). |
 | `flag_inexact` | 1 | Output | Non-zero division remainder or rounding truncation. |
 
@@ -72,8 +73,8 @@ graph TD
         Div0 --> R1
     end
 
-    subgraph Stage 2: Restoring Division Engine
-        R1 --> RestoringDiv[26-bit Restoring Division Engine]
+    subgraph Stage 2: Restoring Division Engine - single combinational stage
+        R1 --> RestoringDiv[26 unrolled restoring iterations, one clock cycle]
         RestoringDiv --> R2[Registers r2_*]
     end
 
@@ -96,16 +97,17 @@ graph TD
 #### Stage 1: Unpack, Div-by-Zero Check & Exponent Difference
 - Unpacks $S_A, E_A, M_A$ and $S_B, E_B, M_B$.
 - Sign of quotient: $S_Q = S_A \oplus S_B$.
-- Restores 24-bit significands: $F_A = \{1'b1, M_A\}$, $F_B = \{1'b1, M_B\}$.
+- Restores 24-bit significands: $F = \{1'b1, M\}$ for $E \ne 0$, $\{1'b0, M\}$ for $E = 0$. Subnormal significands are not normalized, so the quotient-range assumption in Stage 3 does not hold for subnormal inputs.
 - Calculates unbiased exponent: $E_{diff} = E_A - E_B + 127$ using `param_adder_sub`.
 - Special conditions:
   - **Division by Zero ($B = 0, A \ne 0$)**: Asserts `flag_div_by_zero = 1`, forces $Y = \pm\infty$.
   - **Indeterminate Form ($A = 0, B = 0$)**: Asserts `flag_invalid = 1`, forces $Y = \text{QNaN}$.
 
 #### Stage 2: Restoring Significand Division
-- Performs bit-by-bit restoring division over 26 fractional steps:
+- Performs bit-by-bit restoring division over 26 steps:
   $$\text{Dividend } F_A \div \text{Divisor } F_B$$
-- Generates 26 quotient bits ($Q[25:0]$) and the final non-zero remainder.
+- Generates 26 quotient bits ($Q[25:0]$) and the final remainder.
+- The 26 compare-and-subtract steps are written as a `for` loop inside one `always @(*)` block, so synthesis produces a single chain of 26 dependent 50-bit subtract/select steps between the r1 and r2 registers (~243 cells deep in Sky130). Pipelining this loop, or switching to SRT / Newton-Raphson, is needed for higher clock rates.
 
 #### Stage 3: Normalization & Remainder Sticky Extraction
 Since $F_A, F_B \in [1.0, 2.0)$, the quotient $Q \in (0.5, 2.0)$:
@@ -140,3 +142,21 @@ To compile, lint, simulate, and view waveforms in GTKWave:
 3. **Corner Cases**: $0.0 / 5.0 = 0.0$, $5.0 / 0.0 = +\infty$ (`flag_div_by_zero = 1`).
 4. **Special Forms**: $0.0 / 0.0 = \text{NaN}$ (`flag_invalid = 1`), $\infty / \infty = \text{NaN}$.
 5. **Streaming Throughput**: 5 back-to-back vectors on consecutive cycles sustaining 1 op/cycle.
+
+---
+
+## 5. Known Limitations (measured)
+
+Independent bit-exact audit against an exact IEEE 754 reference (2026-10-18):
+
+| Stimulus | Bit-exact | Failures |
+|---|:---:|---|
+| Normal inputs, full exponent range | 2,860 / 3,000 | all 140: quotient should be subnormal, got 0 |
+| Mixed (incl. subnormal operands and specials) | 4,666 / 4,990 | 317 flushed subnormals, 7 wrong values |
+
+Every quotient that lands in the normal range was bit-exact.
+
+| Case | Expected | Got |
+|---|---|---|
+| `0x00800000 / 2.0` | `0x00400000` | `0x00000000` (`flag_underflow=1`) |
+| `qNaN / 1.0` | `flag_invalid = 0` | `flag_invalid = 1` (from RTL: `s1_nan` includes any NaN operand) |

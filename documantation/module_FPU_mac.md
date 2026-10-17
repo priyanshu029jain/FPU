@@ -4,18 +4,21 @@
 
 ## 1. Overview & Architectural Role
 
-`FPU_mac` is a 4-stage synchronous pipelined Fused Multiply-Accumulate (FMA / MAC) unit compliant with the IEEE 754-2008 standard. It computes:
+`FPU_mac` is a 4-stage synchronous pipelined Fused Multiply-Add (FMA / MAC) unit for IEEE 754 binary32. It computes:
 
 $$Y = A \times B + C$$
 
+It is **not fully IEEE 754 compliant**. It has an alignment bug for large exponent gaps and no subnormal support (see [§5](#5-known-limitations-measured)).
+
 ### Key FMA Advantage:
-Unlike a discrete multiplier followed by an adder (which introduces two separate rounding stages and double-rounding errors), this unit maintains **full 100-bit precision across the accumulation datapath** and executes **only a single rounding step** at the final stage, delivering higher numerical accuracy.
+Unlike a discrete multiplier followed by an adder (two roundings), the exact 48-bit product is added to `C` in a 100-bit datapath and **rounded only once** at the final stage. Note that the alignment shifters' sticky outputs are not connected, so bits shifted below bit 0 of the 100-bit field are discarded rather than folded into the sticky bit.
 
 ### Key Features:
-- **4-Stage Synchronous Pipeline**: Deterministic 4-cycle latency from `valid_in` to `valid_out`.
-- **Sustained Throughput**: Accepts 1 new operation per clock cycle (100% throughput).
-- **Subcomponent Instantiation**: Fully integrates `param_multiplier`, 100-bit `barrel_shifter`, 100-bit `param_adder_sub`, 100-bit `leading_zero_detector`, and `param_adder_sub`.
-- **Full IEEE 754-2008 Exception Handling**: `flag_overflow`, `flag_underflow`, `flag_invalid`, `flag_zero`, `flag_inexact`.
+- **4-Stage Synchronous Pipeline**: 4 register stages; `valid_out` rises on the 4th rising edge counting the edge that captures the input.
+- **Sustained Throughput**: Accepts 1 new operation per clock cycle (verified with 32 back-to-back operations).
+- **Subcomponent Instantiation**: Uses `param_multiplier`, 100-bit `barrel_shifter`s, a 100-bit `param_adder_sub`, a 100-bit `leading_zero_detector`, and smaller `param_adder_sub`s for exponents and rounding.
+- **Status Flags**: `flag_overflow`, `flag_underflow`, `flag_invalid`, `flag_zero`, `flag_inexact`.
+- **Timing (Sky130, pre-layout)**: 29.3 ns path (~34 MHz).
 
 Source file: [`rtl/FPU_mac.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/rtl/FPU_mac.v)  
 Testbench: [`tb/sim_tb/tb_fpu_mac.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/tb/sim_tb/tb_fpu_mac.v)
@@ -53,8 +56,8 @@ module FPU_mac (
 | `Y` | 32 | Output | 32-bit single-precision floating-point FMA result. |
 | `valid_out` | 1 | Output | Asserted 4 clock cycles after `valid_in`. |
 | `flag_overflow` | 1 | Output | Exponent $\ge 255$; output saturates to $\pm\infty$. |
-| `flag_underflow` | 1 | Output | Exponent $\le 0$; underflow detected. |
-| `flag_invalid` | 1 | Output | $(0 \times \infty) + C$, $(+\infty) + (-\infty)$, or NaN operands. |
+| `flag_underflow` | 1 | Output | Exponent $\le 0$; the result is **flushed to ±0** (no subnormal output). |
+| `flag_invalid` | 1 | Output | $(0 \times \infty) + C$, $(\pm\infty) + (\mp\infty)$, or any NaN operand (quiet or signaling). |
 | `flag_zero` | 1 | Output | Result cancels to exact zero. |
 | `flag_inexact` | 1 | Output | Truncation occurred during wide alignment or final rounding. |
 
@@ -64,21 +67,22 @@ module FPU_mac (
 
 ```mermaid
 graph TD
-    subgraph Stage 1: Product & Wide Alignment
+    subgraph Stage 1: Unpack & Product
         In[Operands A, B, C] --> Mul[param_multiplier: 24x24-bit Product -> 48 bits]
-        In --> ExpCmp[Compare E_prod vs E_c]
-        ExpCmp --> AlignC[barrel_shifter: 100-bit Right Shift of smaller operand]
+        In --> ExpP[param_adder_sub: E_prod = Ea + Eb - 127]
         Mul --> R1[Registers r1_*]
-        AlignC --> R1
+        ExpP --> R1
     end
 
-    subgraph Stage 2: 100-bit Wide Accumulation
-        R1 --> WideAdd[param_adder_sub: 100-bit Sum Product +/- C]
-        WideAdd --> R2[Registers r2_*]
+    subgraph Stage 2: Wide Alignment
+        R1 --> ExpCmp[param_adder_sub: E_prod - E_c]
+        ExpCmp --> Align[barrel_shifter x2: 100-bit Right Shift of smaller-exponent operand]
+        Align --> R2[Registers r2_*]
     end
 
-    subgraph Stage 3: Wide Cancellation & Normalization
-        R2 --> WideLZD[leading_zero_detector: 100-bit Zero Count]
+    subgraph Stage 3: Wide Add/Sub & LZD
+        R2 --> WideAdd[param_adder_sub: 100-bit Sum P +/- C]
+        WideAdd --> WideLZD[leading_zero_detector: 100-bit Zero Count]
         WideLZD --> R3[Registers r3_*]
     end
 
@@ -92,22 +96,22 @@ graph TD
 
 ### Stage-by-Stage Implementation Details
 
-#### Stage 1: Product Generation & Wide Alignment
+#### Stage 1: Unpack & Product Generation
+- Unpacks $A$, $B$, $C$ and detects special cases (NaN, $0 \times \infty$, $\infty - \infty$, infinities).
 - Computes 48-bit unsigned product of $A$ and $B$ significands using `param_multiplier`:
   $$P_{raw}[47:0] = F_A \times F_B$$
-- Unbiased product exponent: $E_{prod} = E_A + E_B - 127$.
-- Compares $E_{prod}$ with $E_C$ to calculate alignment shift distance $d = |E_{prod} - E_C|$.
-- Places the larger operand at the upper end of a 100-bit vector and right-shifts the smaller operand by $d$ positions using 100-bit `barrel_shifter`.
+- Product exponent: $E_{prod} = E_A + E_B - 127$ (10-bit signed).
 
-#### Stage 2: 100-bit Wide Accumulation
-- Determines effective operation: $\text{eff\_sub} = (S_A \oplus S_B) \oplus S_C$.
-- Executes 100-bit wide addition or subtraction using `param_adder_sub`:
-  $$\text{sum\_100} = \text{aligned\_prod} \pm \text{aligned\_C}$$
-- Registers the 100-bit sum and tentative exponent into `r2_*`.
+#### Stage 2: Wide Alignment
+- Computes $E_{prod} - E_C$ with `param_adder_sub` (10-bit signed).
+- Places the product at bits [99:52] and $C$'s significand at bits [99:76] of 100-bit fields. Right-shifts the operand with the smaller exponent by $d = |E_{prod} - E_C|$ (saturated at 98) using a 100-bit `barrel_shifter`.
+- **Bug:** $|E_{prod} - E_C|$ is computed into the 8-bit `s2_abs_diff`. The signed difference can exceed ±255, so it wraps modulo 256 and the shift is far too small. Example: $-279 \rightarrow 23$. A product that should be negligible is then added at a much higher weight.
+- Shifter sticky outputs are unconnected; bits shifted below bit 0 are lost.
 
-#### Stage 3: Wide Cancellation Detection
-- Scans the 100-bit accumulator using 100-bit `leading_zero_detector`.
-- Evaluates whether subtractive cancellation occurred and stores the shift count into `r3_*`.
+#### Stage 3: 100-bit Add/Subtract & Cancellation Detection
+- Effective operation: subtract if $S_A \oplus S_B \ne S_C$. The larger-magnitude operand is placed first.
+- Executes 100-bit wide addition or subtraction using `param_adder_sub` (carry-out kept as bit 100).
+- Scans the 100-bit sum using the 100-bit `leading_zero_detector` and registers the sum, LZD count and tentative exponent into `r3_*`.
 
 #### Stage 4: Normalization Shifting, Rounding & Packing
 - Shifts the 100-bit accumulator left by the LZD shift count using 100-bit `barrel_shifter`.
@@ -135,3 +139,23 @@ To compile, lint, simulate, and view waveforms in GTKWave:
 2. **Cancellation to Zero**: $2.0 \times 2.0 - 4.0 = 0.0$ (`flag_zero = 1`).
 3. **Corner Cases**: $0.0 \times 0.0 + 0.0 = 0.0$.
 4. **Streaming Throughput**: 5 back-to-back vectors on consecutive cycles sustaining 1 op/cycle.
+
+The project's random stimulus (CRV and cocotb) keeps exponents within roughly 115–135, so the product/addend exponent gap never gets large enough to trigger the alignment bug below.
+
+---
+
+## 5. Known Limitations (measured)
+
+Independent bit-exact audit against an exact IEEE 754 reference (2026-10-18):
+
+| Stimulus | Bit-exact | Failures |
+|---|:---:|---|
+| Normal inputs, full exponent range | 2,981 / 3,000 | all 19: **wrong normal result**, product exponent far below C's |
+| Mixed (incl. subnormal operands and specials) | 4,824 / 5,044 | 205 flushed subnormals, 15 wrong values |
+
+| Case | Expected | Got |
+|---|---|---|
+| `A=9B4E99D0, B=13D13455, C=7AAC7742` | `7AAC7742` | `7AAC773F` |
+| `fma(0x00800000, 0.5, +0)` | `0x00400000` | `0x00000000` (`flag_underflow=1`) |
+
+**Fix for the alignment bug:** compute the absolute difference from the full 10-bit signed `s2_exp_diff`, and saturate the shift amount to 98 from that value instead of from an 8-bit truncation.

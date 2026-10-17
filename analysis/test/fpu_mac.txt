@@ -5,7 +5,8 @@ Generated Timestamp : 2026-10-18 01:34:31
 Target Module       : FPU_mac (IEEE 754 Fused Multiply-Accumulate / MAC: Y = A * B + C)
 Pipeline Structure  : 4-Stage Synchronous Pipeline (Deterministic 4-Cycle Latency)
 Internal Datapath   : 100-bit Wide Internal Accumulator Datapath with Unified Normalization
-Verification Status : 100% ALL TESTS PASSED ACROSS ALL 6 TIERS
+Verification Status : All 6 project tiers pass (re-run 2026-10-18), but see Section 4:
+                      an independent bit-exact audit found IEEE 754 deviations.
 ====================================================================================================
 
 ----------------------------------------------------------------------------------------------------
@@ -15,12 +16,12 @@ TIER  VERIFICATION LEVEL              FRAMEWORK / ENGINE       TESTS    PASSED  
 ----------------------------------------------------------------------------------------------------
 1     Directed Simulation (sim_tb)    Icarus Verilog 12.0      19       19       0        100.00%
 2     Corner-Case Suite (corner_case) SystemVerilog (iverilog) 87       87       0        100.00%
-3     Constrained Random (CRV_tb)     SystemVerilog (iverilog) 250      250      0        100.00%
-4     Algebraic Laws (large_cases)    SystemVerilog (iverilog) 500      500      0        100.00%
-5     Formal Assertions (SVA)         Verilator 5.032 --assert 11 Props 11 Props 0        100.00%
-6     Python Cocotb Verification      Cocotb 2.1.0 + iverilog  1,020    1,020    0        100.00%
+3     Random, no golden ref (CRV_tb)  SystemVerilog (iverilog) 250      250      0        100.00%
+4     Identity laws (large_cases)     SystemVerilog (iverilog) 500      500      0        100.00%
+5     SVA (simulation only)           Verilator 5.032 --assert 11 Props 11 Props 0        100.00%
+6     Cocotb (+/-1 ULP tolerance)     Cocotb 2.1.0 + iverilog  1,020    1,020    0        100.00%
 ----------------------------------------------------------------------------------------------------
-TOTAL VERIFIED MAC TEST VECTORS                                1,887    1,887    0        100.00%
+TOTAL MAC TEST VECTORS (EXCL. SVA)                             1,876    1,876    0        100.00%
 ====================================================================================================
 
 ----------------------------------------------------------------------------------------------------
@@ -40,25 +41,33 @@ TIER 1: DIRECTED SIMULATION (tb/sim_tb/tb_fpu_mac.v)
   - Result: 19 / 19 PASSED (100.00%)
 
 TIER 2: CORNER-CASE & EDGE REGRESSION (tb/corner_case/tb_corner_mac.sv)
-  - Section 1: Zero Arithmetic Combinations (A*B+C with zeros)          : 12 / 12 Passed
-  - Section 2: Infinity Arithmetic Combinations (+/-Inf, cross-signs)   : 11 / 11 Passed
-  - Section 3: Sign Permutations Paired with NaNs (QNaN, SNaN)          : 5 / 5 Passed
-  - Section 4: Dedicated Flag Trigger Vectors (V, U, Z, NV, NX)         : 4 / 4 Passed
-  - Section 5: Target Output Representation Checks                      : 5 / 5 Passed
-  - Section 6: Randomized Sign-Quadrant Stress Loop                     : 50 / 50 Passed
+  - Section 1: Sign Permutations Paired with Zeros (+0.0, -0.0)          : 11 / 11 Passed
+  - Section 2: Infinity Corners Paired with Signs                        : 12 / 12 Passed
+  - Section 3: Sign Permutations Paired with NaNs (QNaN, SNaN)           : 5 / 5 Passed
+  - Section 4: Dedicated Flag Trigger Vectors                            : 4 / 4 Passed
+  - Section 5: Explicit Output Target Verification                       : 5 / 5 Passed
+  - Section 6: Randomized Sign-Quadrant Corner Stress Loop               : 50 / 50 Passed
+  - (Section names and counts taken from the 2026-10-18 re-run log.)
+  - NOTE: no section exercises subnormal operands or results.
   - Result: 87 / 87 PASSED (100.00%)
 
-TIER 3: SYSTEMVERILOG CONSTRAINED RANDOM VERIFICATION (tb/CRV_tb/tb_crv_fpu.sv)
+TIER 3: SYSTEMVERILOG RANDOM-STIMULUS VERIFICATION (tb/CRV_tb/tb_crv_fpu.sv)
+  - NOTE: there is NO golden model. Each transaction is only checked for X/Z bits on Y,
+    sign parity (MUL/DIV) and flag_zero/Y consistency; numerical results are NOT compared.
+    Stimulus uses $urandom (not the SV constraint solver), exponents 120-134 only.
   - 3-operand constrained random generation (A, B, C).
   - Internal 100-bit wide shifter and alignment logic verification.
   - Total transactions targeting FPU_mac (OP_MAC): 250 / 250 Passed (100.00%)
 
-TIER 4: MASSIVE MATHEMATICAL INVARIANCE REGRESSION (tb/large_cases/tb_large_cases.sv)
+TIER 4: IDENTITY-LAW REGRESSION (tb/large_cases/tb_large_cases.sv)
+  - NOTE: X+0, X*0 and zero-operand cases take the special-case bypass path; X*1 and X/1
+    use the datapath with a trivial operand. No commutativity or general-value checks.
   - Section 6: Fused Multiply-Add Identities (A * 1.0 + 0.0 == A)       : 500 / 500 Passed
   - Result: 500 / 500 PASSED (100.00%)
 
-TIER 5: FORMAL CONCURRENT SYSTEMVERILOG ASSERTIONS (tb/SVA/sva_mac.sv)
-  - Simulation Engine: Verilator 5.032 with active assertion synthesis.
+TIER 5: CONCURRENT SYSTEMVERILOG ASSERTIONS (SIMULATION ONLY - NOT FORMAL) (tb/SVA/sva_mac.sv)
+  - Engine: Verilator 5.032 --assert. Assertions are evaluated only while simulating
+    ~10 directed stimulus vectors. No formal tool (.sby / SymbiYosys) is used.
   - Property 1: Pipeline Latency - valid_out asserted exactly 4 cycles after valid_in.
   - Property 2: No Spurious valid_out - valid_out deasserted if valid_in was not asserted.
   - Property 3: Zero Multiplication Addend - 0.0 * B + C produces C.
@@ -70,9 +79,13 @@ TIER 5: FORMAL CONCURRENT SYSTEMVERILOG ASSERTIONS (tb/SVA/sva_mac.sv)
   - Result: 11 / 11 ASSERTIONS MONITORED CLEANLY (0 VIOLATIONS)
 
 TIER 6: PYTHON COCOTB SELF-CHECKING VERIFICATION (tb/cocotb_tb/test_fpu_cocotb.py)
-  - Golden Reference: Python struct-based IEEE 754 float32 software model with FTZ.
+  - Reference: Python double-precision arithmetic rounded to float32 via struct (math.fma
+    for MAC). No FTZ modelling; random operands use exponents ~115-135, so subnormal,
+    overflow and underflow results are not exercised by the random vectors.
   - Vectors Executed: 1,020 randomized and corner-case vectors.
-  - Verification: Bit-exact mantissa/exponent comparison & exception flag compliance.
+  - Check: exact match OR within +/-1 ULP (NOT bit-exact); any zero (either sign) accepted
+    for an expected zero; only flag_zero/flag_nan/flag_inf consulted; fixed seed; one
+    operation every ~5 cycles (no back-to-back streaming).
   - Result: 1,020 / 1,020 PASSED (100.00%)
 
 ----------------------------------------------------------------------------------------------------
@@ -102,4 +115,27 @@ RESULT: ALL PIPELINED 4-STAGE TESTS PASSED SUCCESSFULLY!
 
 >>> Cocotb Scoreboard:
 MAC / FMA (Y = A * B + C)      | 1020     | 1020     | 0        | 100.00%
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+4. INDEPENDENT BIT-EXACT AUDIT (2026-10-18)
+----------------------------------------------------------------------------------------------------
+Bench   : extra cocotb test on FPU_top (not part of the project suite)
+Reference: exact rational arithmetic (Python Fraction) with correct IEEE 754 RNE and
+          subnormals, cross-checked against 597,483 host float results (0 mismatches)
+Check   : bit-exact (any NaN accepted for NaN); 1 operation per cycle, mixed opcodes
+
+Pipeline : constant 4-stage latency; 32 back-to-back FMAs -> 32 consecutive valid results
+Normal inputs, full exponent range   : 2,981 / 3,000 bit-exact (99.37%)
+   - all 19 failures: WRONG normal results when the product exponent is far below C's
+Mixed stimulus (incl. subnormal/special): 4,824 / 5,044 bit-exact (95.64%)
+   - 205 flushed-to-zero subnormal results, 15 wrong values
+Directed:
+   fma(0x00800000, 0.5, +0)          : expected 0x00400000, got 0x00000000 -> FTZ
+   A=9B4E99D0 B=13D13455 C=7AAC7742  : expected 0x7AAC7742, got 0x7AAC773F -> wrong value
+Root cause of the wrong values (rtl/FPU_mac.v, Stage 2):
+   s2_abs_diff is 8 bits wide but the signed exponent difference E_prod - E_c can exceed
+   +/-255, so the alignment shift amount wraps modulo 256 (e.g. -279 -> shift of 23) and a
+   tiny product is added as if it were significant. Fix: derive the saturated shift amount
+   from the full 10-bit difference.
 ====================================================================================================

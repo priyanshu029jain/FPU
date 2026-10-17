@@ -4,7 +4,7 @@
 
 ## 1. Overview & Architectural Role
 
-`output_convertor` decodes and converts an IEEE 754-2008 single-precision 32-bit float into signed integer or signed Q16.16 fixed-point representations. Simultaneously, it unpacks internal fields (sign, unbiased true base-2 exponent, and full 24-bit significand with implicit 1 restored) and generates classification flags (Zero, Infinity, NaN, and Integer Overflow) for system-level debugging and waveform inspection.
+`output_convertor` decodes and converts an IEEE 754-2008 single-precision 32-bit float into signed integer or signed Q16.16 fixed-point representations. Simultaneously, it unpacks internal fields (sign, unbiased true base-2 exponent, and full 24-bit significand with implicit 1 restored) and generates classification flags (Zero, Infinity, NaN, and Integer Overflow) for system-level debugging and waveform inspection. It is a **standalone** combinational block: it is tested in `tb/sim_tb/tb_fpu_top.v` but is **not instantiated in `FPU_top`**.
 
 Source file: [`component/output_convertor.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/component/output_convertor.v)  
 Testbench: [`tb/sim_tb/tb_fpu_top.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/tb/sim_tb/tb_fpu_top.v)
@@ -65,6 +65,8 @@ $$\text{significand} = (\text{expo} == 8'h00) \ ? \ \{1'b0, \text{mant}\} : \{1'
   - If $0 \le \text{unbiased\_exp} \le 23$: Shift right: $mag = \text{significand} \gg (23 - \text{unbiased\_exp})$.
   - If $23 < \text{unbiased\_exp} \le 30$: Shift left: $mag = \text{significand} \ll (\text{unbiased\_exp} - 23)$.
   - If $\text{unbiased\_exp} \ge 31$: Assert `overflow = 1`.
+- **Rounding**: fractional bits are shifted out, i.e. **truncation toward zero** (e.g. 2.7 → 2, −2.7 → −2), as in a C cast; no IEEE rounding mode is applied.
+- **Saturation**: when `overflow` is raised the magnitude is forced to `0x7FFFFFFF` and then negated if the sign is set. Negative overflow therefore gives `0x80000001` (−2147483647), not INT_MIN, and exactly $-2^{31}$ (`0xCF000000`) is reported as overflow even though it is representable. In Q16.16 mode the overflow threshold is `unbiased_exp >= 15`.
 - **Two's Complement Negation**:
   $$\text{binary\_out} = \text{sign} \ ? \ (-\text{mag}) : \text{mag}$$
 

@@ -13,9 +13,12 @@
 - `op = 2'b11` : **Division** ($Y = A \div B$)
 
 ### Key Features:
-- **Unified 4-Stage Latency**: Every operation across all 4 opcodes is aligned to a deterministic 4-clock-cycle latency.
-- **Clocked Opcode Pipeline**: An internal 4-cycle shift register tracks `op` across the pipeline to multiplex the correct execution engine output onto the top-level bus.
-- **Complete IEEE 754 Status Flags**: Aggregates and drives `flag_zero`, `flag_inf`, `flag_nan`, `flag_invalid`, `flag_overflow`, `flag_underflow`, `flag_inexact`, and `flag_div_by_zero`.
+- **Unified Latency**: All four units have 4 register stages. `valid_out` rises on the 4th rising edge counting the edge that captures the input, for every opcode.
+- **1 op/cycle, mixed opcodes**: Verified by streaming a repeating ADD→MUL→FMA→DIV sequence and 20,000 random mixed-opcode operations on consecutive cycles. All results returned in order.
+- **Clocked Opcode Pipeline**: A 4-deep register chain (`op_pipe1..4`) tracks `op` so the output multiplexer selects the unit whose result is arriving.
+- **Status Flags**: `flag_zero`, `flag_inf`, `flag_nan`, `flag_invalid`, `flag_overflow`, `flag_underflow`, `flag_inexact`, and `flag_div_by_zero`.
+- **Not included**: `input_convertor` / `output_convertor` are not instantiated here (they are standalone components).
+- **Clock rate**: the four units share one clock, so the divider sets the limit. Minimum period is **100.506 ns (9.95 MHz)** in Sky130 synthesis with the repo's STA script, or 105.789 ns (9.45 MHz) with `timing.sdc` constraints.
 
 Source file: [`rtl/FPU_top.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/rtl/FPU_top.v)  
 Testbench: [`tb/sim_tb/tb_fpu_top.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/tb/sim_tb/tb_fpu_top.v)
@@ -72,7 +75,7 @@ graph TD
     Demux -->|op == 10| MAC[FPU_mac: 4-Stage Pipeline]
     Demux -->|op == 11| Div[FPU_division: 4-Stage Pipeline]
 
-    In --> OpPipe[4-Cycle Opcode Pipeline Shift Register: op_pipe_d4]
+    In --> OpPipe[4-Cycle Opcode Pipeline Shift Register: op_pipe4]
 
     Adder --> Mux[Output Multiplexer]
     Mul --> Mux
@@ -84,23 +87,23 @@ graph TD
 ```
 
 ### Opcode Delay Pipeline
-To ensure that the output multiplexer selects the result corresponding to the operation initiated 4 clock cycles prior, `op` and `valid_in` are shifted across internal pipeline registers:
+To ensure that the output multiplexer selects the result of the operation issued 4 clock edges earlier, `op` is shifted through four registers. `valid_in` is not delayed here; each unit carries its own valid bit through its pipeline, and the selected unit's `valid_out` is forwarded.
 ```verilog
 always @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        op_d1 <= 2'b00; op_d2 <= 2'b00; op_d3 <= 2'b00; op_d4 <= 2'b00;
-        v_d1  <= 1'b0;  v_d2  <= 1'b0;  v_d3  <= 1'b0;  v_d4  <= 1'b0;
+        op_pipe1 <= 2'b00; op_pipe2 <= 2'b00; op_pipe3 <= 2'b00; op_pipe4 <= 2'b00;
     end else begin
-        op_d1 <= op;    op_d2 <= op_d1; op_d3 <= op_d2; op_d4 <= op_d3;
-        v_d1  <= valid_in; v_d2 <= v_d1; v_d3 <= v_d2; v_d4 <= v_d3;
+        op_pipe1 <= op; op_pipe2 <= op_pipe1; op_pipe3 <= op_pipe2; op_pipe4 <= op_pipe3;
     end
 end
 ```
 
+Each unit's `valid_in` is gated by the opcode, e.g. `.valid_in(valid_in && (op == 2'b00))` for the adder.
+
 ### Output Routing:
 ```verilog
 always @(*) begin
-    case (op_d4)
+    case (op_pipe4)
         2'b00: begin // ADD / SUB
             Y = y_add; valid_out = v_add; flag_overflow = ovf_add;
             flag_underflow = unf_add; flag_invalid = inv_add; flag_zero = z_add;
@@ -121,7 +124,11 @@ always @(*) begin
             flag_underflow = unf_div; flag_invalid = inv_div; flag_zero = z_div;
             flag_inexact = inex_div; flag_div_by_zero = dz_div;
         end
+        default: begin /* all outputs 0 */ end
     endcase
+
+    flag_inf = (Y[30:23] == 8'hFF) && (Y[22:0] == 23'h0);
+    flag_nan = (Y[30:23] == 8'hFF) && (Y[22:0] != 23'h0);
 end
 ```
 
@@ -135,12 +142,31 @@ To compile, lint, simulate, and view waveforms for the entire suite in GTKWave:
 ./run top
 ```
 
-### Summary of Full 180+ Test Suite:
-- **`input_convertor`**: 25 tests (Integers & Q16.16 fixed-point to float).
-- **`output_convertor`**: 25 tests (Float to integer & Q16.16, field unpacking, flags).
-- **`FPU_adder`**: 36 tests (Direct, corner, subtraction, infinities, NaNs, streaming).
-- **`FPU_multiplier`**: 25 tests (Direct, fractions, signs, corners, streaming).
-- **`FPU_mac`**: 19 tests (FMA, cancellation, corners, streaming).
-- **`FPU_division`**: 25 tests (Direct quotients, signs, corners, div-by-zero, streaming).
-- **`FPU_top`**: 4 operational tests verifying opcode multiplexing across all 4 modes.
-- **Master Result**: **180/180 TESTS PASSED (100% SUCCESS)**.
+### Summary of the 180-Test Suite (`tb/sim_tb/tb_fpu_top.v`)
+Counts from the 2026-10-18 re-run log. The testbench's section banners print slightly different nominal numbers.
+- **`input_convertor`**: 30 tests (integers & Q16.16 fixed-point to float).
+- **`output_convertor`**: 25 tests (float to integer & Q16.16, field unpacking, flags).
+- **`FPU_adder`**: 45 tests (30 + 15 additional vectors).
+- **`FPU_multiplier`**: 25 tests.
+- **`FPU_mac`**: 25 tests.
+- **`FPU_division`**: 26 tests.
+- **`FPU_top`**: 4 tests, one per opcode, checking the output multiplexer.
+- **Result**: **180/180 passed**.
+
+Other suites that target `FPU_top`: `./run crv` (1,000 random transactions, property checks only, **no golden model**), `./run large` (2,800 identity-law vectors), `./run corner_top` (128) and `./run cocotb` (4,052, ±1 ULP tolerance).
+
+---
+
+## 5. Known Limitations (measured)
+
+Independent bit-exact audit of `FPU_top` against an exact IEEE 754 reference (2026-10-18), 20,000 back-to-back mixed-opcode operations:
+
+| Outcome | Count |
+|---|:---:|
+| Bit-exact | 18,638 (93.19%) |
+| Subnormal result flushed to zero | 1,036 (5.18%) |
+| Wrong value (subnormal operands; FMA alignment bug) | 326 (1.63%) |
+
+With normal inputs only: ADD 3,000/3,000, MUL 2,890/3,000, FMA 2,981/3,000, DIV 2,860/3,000 bit-exact.
+
+See [`architecture.md` §4](architecture.md#4-deviations-from-ieee-754) for the full list of deviations: no subnormals, subnormal-input errors, FMA large-gap alignment wrap, `+0 + −0 → −0`, `flag_invalid` on quiet NaNs, RNE only.

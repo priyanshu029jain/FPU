@@ -1,53 +1,60 @@
-# FPGA Synthesis & Resource Utilization Analysis
+# FPGA Resource Utilization (Xilinx 7-Series)
 
-This analysis evaluates the hardware footprint, resource utilization, and timing characteristics of the Floating-Point Unit when targeted to modern FPGA architectures (e.g., AMD/Xilinx 7-Series & UltraScale+, Intel Cyclone V).
-
----
-
-## 1. Estimated FPGA Resource Utilization
-
-Target: **Xilinx Artix-7 (XC7A35T-1CPG236C)** / **Kintex-7**
-
-| Module | 6-LUTs | Flip-Flops (FF) | DSP48E1 Slices | Block RAM (BRAM) |
-|---|:---:|:---:|:---:|:---:|
-| **`FPU_adder`** | ~380 | Combinational (0) | 0 | 0 |
-| **`FPU_multiplier`** | ~240 | Combinational (0) | 2 | 0 |
-| **`FPU_mac`** | ~780 | Combinational (0) | 2 | 0 |
-| **`FPU_division`** | ~690 | Combinational (0) | 0 | 0 |
-| **`input_convertor`** | ~85 | Combinational (0) | 0 | 0 |
-| **`output_convertor`** | ~110 | Combinational (0) | 0 | 0 |
-| **`FPU_top` (Unified)** | **~2,200** | **0 (Combinational)** | **2 - 4** | **0** |
-
-*Note: In `FPU_top`, if DSP sharing is enabled by synthesis tool mapping, the multiplier inside `FPU_multiplier` and `FPU_mac` can share the same DSP48 tiles.*
+> **Revision note (2026-10-18).** The previous version of this file was hand-estimated: no FPGA tool had been run. It listed 0 flip-flops for every module, which contradicts the 4-stage pipelined RTL, and it gave LUT counts 2–4× lower than real synthesis. It also quoted FPGA delays and f<sub>max</sub> figures (e.g. "> 250 MHz") that were never measured. Those numbers have been replaced with real synthesis results below, and the unmeasured timing claims have been removed.
 
 ---
 
-## 2. DSP Block Mapping for Mantissa Multiplication
-- In IEEE 754 single-precision, the significand multiplication is unsigned $24 \times 24$ bits.
-- **Xilinx DSP48E1 Slice**: Features an $18 \times 25$ two's-complement multiplier.
-  - An unsigned $24 \times 24$ multiplication requires **two DSP48E1 slices** cascaded:
-    - DSP 1: $17 \times 24$ bits
-    - DSP 2: $7 \times 24$ bits (shifted and summed)
-- **Xilinx UltraScale+ DSP48E2 Slice**: Features a $27 \times 18$ multiplier, fitting $24 \times 24$ in **1 to 2 DSP slices**.
+## 1. Resource Utilization (Yosys `synth_xilinx`)
+
+**Flow:** Yosys 0.52, `synth_xilinx -family xc7 -flatten`, RTL as in the repository. This is **logic synthesis only**: no Vivado, no placement or routing. Counts are close to, but not identical to, what Vivado would report.
+
+| Module | LUTs (LUT1–6) | Flip-flops (FDCE) | DSP48E1 | CARRY4 | MUXF7 / MUXF8 | BRAM |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| `FPU_adder` | 765 | 287 | 0 | 30 | 93 / 32 | 0 |
+| `FPU_multiplier` | 143 | 213 | 2 | 19 | 3 / 0 | 0 |
+| `FPU_mac` | 2,032 | 546 | 2 | 59 | 271 / 76 | 0 |
+| `FPU_division` | 3,069 | 196 | 0 | 338 | 450 / 217 | 0 |
+| `input_convertor` (combinational) | 332 | 0 | 0 | 16 | 37 / 15 | 0 |
+| `output_convertor` (combinational) | 306 | 0 | 0 | 19 | 99 / 23 | 0 |
+| **`FPU_top`** | **5,945** | **1,196** | **4** | **443** | 534 / 236 | **0** |
+
+`FPU_top` does not instantiate the two converters, so their resources are not included in the `FPU_top` row.
+
+### Fit on an Artix-7 XC7A35T (20,800 LUTs, 41,600 FFs, 90 DSP48E1)
+
+| Resource | `FPU_top` | Utilization |
+|---|:---:|:---:|
+| LUTs | 5,945 | ~28.6% |
+| Flip-flops | 1,196 | ~2.9% |
+| DSP48E1 | 4 | ~4.4% |
+
+### Observations
+- **Divider is the largest unit** (~52% of `FPU_top` LUTs) because all 26 restoring-division iterations are unrolled combinationally in a single pipeline stage (338 CARRY4 chains).
+- **Each 24×24 significand multiply maps to 2 DSP48E1** (the DSP48E1 multiplier is 25×18). `FPU_multiplier` and `FPU_mac` each have their own multiplier, giving 4 DSPs in `FPU_top`. No DSP sharing is performed.
+- **No BRAM or LUTRAM** is used; all pipeline state is in FDCE flip-flops (async-clear, matching `rst_n`).
 
 ---
 
-## 3. Timing & Critical Path Analysis
+## 2. Timing
 
-### Critical Path Hotspots
-1. **Divider (`FPU_division.v`)**:
-   - The 26-step restoring divider creates a combinatorial carry cascade through 26 successive subtract-and-multiplex stages.
-   - Longest combinatorial delay: $\approx 14.5\text{ ns}$ (Speed grade -1).
-2. **Fused MAC (`FPU_mac.v`)**:
-   - Path: $24 \times 24$ multiply $\rightarrow$ 100-bit wide alignment shift $\rightarrow$ 100-bit add/sub $\rightarrow$ 100-bit LZD $\rightarrow$ rounding.
-   - Longest delay: $\approx 16.2\text{ ns}$.
+**FPGA timing has not been measured.** Yosys `synth_xilinx` does not perform timing analysis, and no Vivado / nextpnr-xilinx run exists for this project.
 
-### Clock Frequency Estimation
-- **Pure Combinational (Single-cycle)**:
-  - Max Operating Frequency ($F_{max}$): **$\approx 60\text{ MHz} - 75\text{ MHz}$** on Artix-7 (-1).
-- **Recommended 4-Stage Pipelining**:
-  - Stage 1: Unpack + $24 \times 24$ Significand Multiply / Align Shift
-  - Stage 2: Wide Addition / Subtraction
-  - Stage 3: Leading Zero Detection (LZD)
-  - Stage 4: Round-to-Nearest-Even + Pack
-  - **Pipelined $F_{max}$**: **$> 250\text{ MHz}$** on 7-Series, **$> 400\text{ MHz}$** on UltraScale+.
+What can be said qualitatively:
+- The `FPU_top` clock will be set by the divider's Stage 2, a single-cycle chain of 26 subtract-and-select steps. On Sky130 ASIC synthesis this path is ~100 ns (see [`../asic/asic_analysis.md`](../asic/asic_analysis.md)). On a 7-series FPGA it will also be far slower than the other units.
+- The MAC's Stage 4 (100-bit normalize + round) is the next-longest path.
+- Pipelining the divider is a prerequisite for running `FPU_top` at a typical FPGA clock (100 MHz+).
+
+To obtain real numbers, synthesize and implement in Vivado with a clock constraint and read `report_timing_summary`.
+
+---
+
+## 3. Reproducing
+
+```bash
+yosys -p "read_verilog component/param_adder_sub.v component/param_multiplier.v \
+          component/barrel_shifter.v component/leading_zero_detector.v \
+          rtl/FPU_adder.v rtl/FPU_multiplier.v rtl/FPU_division.v rtl/FPU_mac.v rtl/FPU_top.v; \
+          synth_xilinx -family xc7 -top FPU_top -flatten; stat"
+```
+
+Replace `-top FPU_top` (and the file list) to synthesize an individual unit.

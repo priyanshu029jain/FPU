@@ -4,17 +4,18 @@
 
 ## 1. Overview & Architectural Role
 
-`FPU_multiplier` is a 4-stage synchronous pipelined IEEE 754-2008 single-precision floating-point multiplier. It performs the multiplication of two floating-point numbers:
+`FPU_multiplier` is a 4-stage synchronous pipelined IEEE 754 binary32 multiplier. It is bit-exact whenever the result is a normal number, but it **does not support subnormals** (results are flushed to zero; subnormal inputs can give wrong values; see [§5](#5-known-limitations-measured)). It performs the multiplication of two floating-point numbers:
 
 $$Y = A \times B = \left((-1)^{S_A} \cdot 1.M_A \cdot 2^{E_A - 127}\right) \times \left((-1)^{S_B} \cdot 1.M_B \cdot 2^{E_B - 127}\right)$$
 $$Y = (-1)^{S_A \oplus S_B} \cdot (1.M_A \times 1.M_B) \cdot 2^{(E_A + E_B - 127) - 127}$$
 
 ### Key Features:
-- **4-Stage Synchronous Pipeline**: Deterministic 4-cycle latency from `valid_in` to `valid_out`.
-- **Sustained Throughput**: Accepts 1 new operation per clock cycle (100% throughput).
-- **Subcomponent Instantiation**: Fully integrates `param_multiplier`, `param_adder_sub`, and `barrel_shifter`.
-- **Full IEEE 754-2008 Exception Handling**: `flag_overflow`, `flag_underflow`, `flag_invalid`, `flag_zero`, `flag_inexact`.
-- **Round-to-Nearest-Even (RNE)**: Comprehensive 48-bit product reduction and GRS rounding.
+- **4-Stage Synchronous Pipeline**: 4 register stages; `valid_out` rises on the 4th rising edge counting the edge that captures the input.
+- **Sustained Throughput**: Accepts 1 new operation per clock cycle (verified with 32 back-to-back operations).
+- **Subcomponent Instantiation**: Uses `param_multiplier`, `param_adder_sub`, and `barrel_shifter`.
+- **Status Flags**: `flag_overflow`, `flag_underflow`, `flag_invalid`, `flag_zero`, `flag_inexact`.
+- **Round-to-Nearest-Even (RNE)** only: 48-bit product reduced to 24 bits with GRS rounding.
+- **Timing (Sky130, pre-layout)**: misses 100 MHz by 0.38 ns (~96 MHz).
 
 Source file: [`rtl/FPU_multiplier.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/rtl/FPU_multiplier.v)  
 Testbench: [`tb/sim_tb/tb_fpu_multiplier.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/tb/sim_tb/tb_fpu_multiplier.v)
@@ -51,9 +52,9 @@ module FPU_multiplier (
 | `Y` | 32 | Output | 32-bit single-precision floating-point product. |
 | `valid_out` | 1 | Output | Asserted 4 clock cycles after `valid_in` to indicate valid data on `Y`. |
 | `flag_overflow` | 1 | Output | Exponent $\ge 255$; output saturates to $\pm\infty$. |
-| `flag_underflow` | 1 | Output | Exponent $\le 0$; underflow detected. |
-| `flag_invalid` | 1 | Output | $0.0 \times \pm\infty$ or NaN operands; output is canonical QNaN. |
-| `flag_zero` | 1 | Output | Result is zero ($A=0$ or $B=0$). |
+| `flag_underflow` | 1 | Output | Final exponent $\le 0$; the result is **flushed to ±0** (no subnormal output). |
+| `flag_invalid` | 1 | Output | $0.0 \times \pm\infty$ or any NaN operand (quiet or signaling); output is canonical QNaN. |
+| `flag_zero` | 1 | Output | Result is ±0 (zero operand, or a flushed underflow). |
 | `flag_inexact` | 1 | Output | Inexact flag: lower bits of product discarded during rounding. |
 
 ---
@@ -94,7 +95,7 @@ graph TD
 #### Stage 1: Unpack & Exponent Summation
 - Unpacks $S_A, E_A, M_A$ and $S_B, E_B, M_B$.
 - Computes tentative sign: $S_{prod} = S_A \oplus S_B$.
-- Restores 24-bit significands: $F_A = \{1'b1, M_A\}$, $F_B = \{1'b1, M_B\}$.
+- Restores 24-bit significands: $F = \{1'b1, M\}$ for $E \ne 0$, $\{1'b0, M\}$ for $E = 0$. Subnormal significands are not normalized and their exponent is taken as 0 rather than 1, so the product-range assumption in Stage 3 does not hold for subnormal inputs.
 - Calculates unbiased exponent sum using `param_adder_sub`:
   $$E_{sum} = E_A + E_B - 127$$
 - Detects special cases: Zero ($A=0 \lor B=0$), Infinity ($A=\infty \lor B=\infty$), and NaN ($0 \times \infty$ or NaN).
@@ -118,7 +119,7 @@ Since both inputs are in $[1.0, 2.0)$, the product is bounded in $[1.0, 4.0)$:
 #### Stage 4: Round-to-Nearest-Even (RNE) & Packaging
 - Evaluates RNE rounding increment: $\text{round\_inc} = G \land (F[0] \lor R \lor S)$.
 - Adds `round_inc` to significand using `param_adder_sub`.
-- Formats 32-bit output: $Y = \{S_{prod}, E_{final}[7:0], M_{final}[22:0]\}$.
+- Formats 32-bit output: $Y = \{S_{prod}, E_{final}[7:0], M_{final}[22:0]\}$. $E_{final} \ge 255$ gives ±∞; $E_{final} \le 0$ gives ±0 (flush-to-zero).
 - Asserts `valid_out` and generates overflow/underflow flags.
 
 ---
@@ -137,3 +138,23 @@ To compile, lint, simulate, and view waveforms in GTKWave:
 3. **Corner Cases**: $0.0 \times 5.0 = 0.0$, $0.0 \times 0.0 = 0.0$, $1.0 \times 42.0 = 42.0$.
 4. **Special Values**: $0.0 \times \infty = \text{NaN}$ (`flag_invalid = 1`), $\infty \times 5.0 = \infty$.
 5. **Streaming Throughput**: 5 back-to-back vectors on consecutive cycles sustaining 1 op/cycle.
+
+---
+
+## 5. Known Limitations (measured)
+
+Independent bit-exact audit against an exact IEEE 754 reference (2026-10-18):
+
+| Stimulus | Bit-exact | Failures |
+|---|:---:|---|
+| Normal inputs, full exponent range | 2,890 / 3,000 | all 110: result should be subnormal, got 0 |
+| Mixed (incl. subnormal operands and specials) | 4,583 / 4,914 | 326 flushed subnormals, 5 wrong values |
+
+Every result that lands in the normal range was bit-exact.
+
+| Case | Expected | Got |
+|---|---|---|
+| `0x00800000 × 0x3F000000` (min normal × 0.5) | `0x00400000` | `0x00000000` (`flag_underflow=1`) |
+| `0x00000001 × 1.0` | `0x00000001` | `0x00000000` |
+| `0x00400000 × 2.0` (subnormal input) | `0x00800000` | `0x00C00000` |
+| `qNaN × 1.0` | `flag_invalid = 0` | `flag_invalid = 1` (from RTL: `s1_nan` includes any NaN operand) |

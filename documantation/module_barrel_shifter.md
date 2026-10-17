@@ -4,13 +4,13 @@
 
 ## 1. Overview & Architectural Role
 
-`barrel_shifter` is a parameterized, single-cycle combinational barrel shifter capable of bidirectional (left/right) logical and arithmetic shifts. Uniquely, it features an exact **Sticky Bit Generator** which calculates the reduction OR of all bits shifted beyond the right boundary, an indispensable feature for IEEE 754 Guard-Round-Sticky (GRS) rounding.
+`barrel_shifter` is a parameterized, single-cycle combinational barrel shifter capable of bidirectional (left/right) logical and arithmetic shifts. It also provides a **Sticky Bit Generator** which calculates the reduction OR of all bits shifted beyond the right boundary, an indispensable feature for IEEE 754 Guard-Round-Sticky (GRS) rounding.
 
 ### Role in FPU Modules:
 - **`FPU_adder`**: Aligns the smaller significand rightwards by the exponent difference ($\Delta E$), capturing sticky bits. Post-normalizes the sum leftwards by the LZD cancellation count.
-- **`FPU_multiplier`**: Normalizes the 48-bit product right by 1 bit or left as necessary.
+- **`FPU_multiplier`**: Shifts the 48-bit product right by 1 bit when bit 47 is set.
 - **`FPU_division`**: Performs 1-bit normalization alignment on the computed quotient.
-- **`FPU_mac`**: Executes a 100-bit wide right alignment of operand $C$ across the accumulation datapath.
+- **`FPU_mac`**: Two 100-bit instances right-align whichever of the product or $C$ has the smaller exponent; a third left-shifts the 100-bit sum for normalization. The `sticky` outputs of these instances are left unconnected, so bits shifted out are discarded.
 
 Source file: [`component/barrel_shifter.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/component/barrel_shifter.v)  
 Testbench: [`tb/sim_tb/tb_barrel_shifter.v`](file:///c:/Users/LENOVO/Documents/GitHub/floating_point_unit/tb/sim_tb/tb_barrel_shifter.v)
