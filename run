@@ -53,9 +53,15 @@ case "$TARGET" in
         VCD="waveform_lzd.vcd"
         MOD_NAME="Leading Zero Detector"
         ;;
+    fpu_adder|fpuadder)
+        RTL="rtl/FPU_adder.v component/param_adder_sub.v component/barrel_shifter.v component/leading_zero_detector.v"
+        TB="tb/sim_tb/tb_fpu_adder.v"
+        VCD="waveform_fpu_adder.vcd"
+        MOD_NAME="Modular FPU Adder (IEEE 754)"
+        ;;
     *)
         echo "Error: Unknown target '$1'!"
-        echo "Valid targets: adder, multiplier, barrel_shifter, LZD"
+        echo "Valid targets: adder, multiplier, barrel_shifter, LZD, fpu_adder"
         exit 1
         ;;
 esac
@@ -73,7 +79,7 @@ rm -f "$VCD" sim.vvp
 # 3. Optional Verilator Lint Stage
 if command -v verilator >/dev/null 2>&1; then
     echo "[STEP 1/3] Running Verilator lint check..."
-    verilator --lint-only -Wall --timing "$RTL" "$TB"
+    verilator --lint-only -Wall --timing $RTL "$TB"
     echo ">> Verilator lint check passed!"
 else
     echo "[STEP 1/3] Verilator not found in PATH; skipping Verilator lint."
@@ -81,7 +87,7 @@ fi
 
 # 4. Icarus Verilog Compilation Stage
 echo "[STEP 2/3] Compiling with Icarus Verilog (iverilog)..."
-iverilog -Wall -g2012 -o sim.vvp "$TB" "$RTL"
+iverilog -Wall -g2012 -o sim.vvp "$TB" $RTL
 echo ">> Compilation successful!"
 
 # 5. Simulation Execution Stage
