@@ -793,3 +793,120 @@ Complete physical synthesis with **Yosys** and Static Timing Analysis (STA) with
    - The cascaded 26-bit restoring division loop in Stage 2 creates an unrolled carry chain spanning ~487 logic levels with ~99.55 ns propagation delay.
    - **Recommended Architecture**: For high-performance ASIC tapeout, replacing the restoring subtraction chain with an iterative **SRT Radix-4 digit-recurrence divider** or a **Goldschmidt reciprocal multiplier** reduces silicon area by ~65% and closes timing at >100 MHz.
 
+---
+
+## 9. Second Verification Pass (2026-10-18): Independent Re-Verification Findings
+
+After the first round of verification (Sections 3–8) reported 100% pass rates everywhere, the whole project went through a second, independent verification pass. Its goal was to check whether the tests and reports actually support the claims made in the README and analysis files, not just whether the tests pass.
+
+### 9.1 What Was Re-Run
+
+| Activity | Tools | Result |
+|---|---|---|
+| All 16 Icarus testbenches (unit, CRV, large, corner) + Verilator `-Wall` lint | Icarus 12.0, Verilator 5.032 | **All pass, lint clean** |
+| All 4 SVA benches | Verilator 5.032 `--binary --assert` | 48 assertions (11/12/14/11), 0 failures |
+| Project cocotb regression | cocotb 2.1 + Icarus | 4,052 / 4,052 |
+| Yosys + OpenSTA for all 5 units (reports deleted first, then regenerated) | Yosys 0.52, OpenSTA | **Byte-identical** to the committed `analysis/asic/*.txt` |
+| **New:** bit-exact audit of `FPU_top` | cocotb + exact rational (`Fraction`) IEEE 754 reference, cross-checked against 597,483 host float results | See 9.2 |
+| **New:** latency / throughput, subnormal probes, formal-tool search, full-FPU f<sub>max</sub> sweep | cocotb, `grep`, OpenSTA binary search | See 9.2 / 9.3 |
+| **New:** Xilinx 7-series resource synthesis | Yosys `synth_xilinx -family xc7` | See Failure 21 |
+
+### 9.2 Second-Verification Results
+
+**Confirmed claims**
+- Every unit has a fixed **4-register-stage latency**: `valid_out` rises 3 clock edges after the edge that samples `valid_in`.
+- **One operation per cycle** works. 32 back-to-back operations of each type, a repeating ADD→MUL→FMA→DIV sequence, and 20,000 random mixed-opcode operations all returned in order on consecutive cycles.
+- **ADD is bit-exact for normal inputs** across the full exponent range: 3,000 / 3,000.
+- MUL and DIV are bit-exact on every result that lands in the normal range.
+- Overflow and divide-by-zero flags were correct on every correctly computed result.
+
+**Bit-exact audit summary**
+
+| Stimulus | ADD | MUL | FMA | DIV |
+|---|:---:|:---:|:---:|:---:|
+| Normal inputs only, full exponent range (3,000 each) | 3,000 | 2,890 | 2,981 | 2,860 |
+| Mixed incl. subnormal operands & specials | 4,565 / 5,052 | 4,583 / 4,914 | 4,824 / 5,044 | 4,666 / 4,990 |
+
+Over 20,000 mixed operations: **93.19% bit-exact, 5.18% subnormal flushed to zero, 1.63% wrong value**.
+
+### 9.3 New Failures Found in the Second Pass
+
+#### Failure 13: FMA Alignment Wrap-Around for Large Exponent Gaps (RTL bug, open)
+- **Observed:** `A=9B4E99D0, B=13D13455, C=7AAC7742` returned `7AAC773F`; the correct result is `7AAC7742`. 19 of 3,000 normal-only FMA operations were wrong.
+- **Root cause:** in `FPU_mac.v` Stage 2, `s2_abs_diff` is 8 bits wide, but the signed difference `E_prod − E_c` can exceed ±255. A difference of −279 wraps to a shift of 23, so a negligible product is added at a much higher weight.
+- **Why it was missed:** the CRV and cocotb random stimulus uses exponents of roughly 115–135, so the gap never exceeds 255.
+- **Fix:** derive the absolute difference and the shift saturation from the full 10-bit `s2_exp_diff`.
+
+#### Failure 14: No Subnormal Results (flush-to-zero) Despite "Full Subnormal Support" Claim
+- **Observed:** `0x00000001 + 0x00000001` → `0x00000000` (expected `0x00000002`). `0x00800000 × 0x3F000000` → `0x00000000` (expected `0x00400000`). DIV and FMA behave the same way, all with `flag_underflow = 1`.
+- **Root cause:** Stage 4 of every unit packs any result whose exponent would be ≤ 0 as ±0. Gradual underflow is not implemented.
+- **Why it was missed:** none of the corner-case testbenches contains a subnormal section. The earlier per-unit reports listed a "Subnormals & Flush-to-Zero" section that does not exist in the testbenches.
+
+#### Failure 15: Subnormal Inputs Produce Wrong Values (RTL bug, open)
+- **Observed:** `0x00400000 × 2.0` → `0x00C00000` (expected `0x00800000`). `0x00540245 + 0x01A4B37C` → `0x01AF33C5` (expected `0x01B9B40D`).
+- **Root cause:** for E = 0 the hidden bit is set to 0, but the exponent stays at the field value 0 instead of the effective exponent 1, and the significand is not normalized.
+
+#### Failure 16: `+0 + −0` Returns `−0`, and a Test Expects It (RTL bug, open)
+- **Observed:** `00000000 + 80000000` → `80000000`. IEEE RNE requires `+0`.
+- **Root cause:** the adder's zero bypass returns `B` whenever `A` is zero.
+- **Test issue:** `tb_corner_adder.sv` test #14 expects `(+0.0) + (−0.0) = −0.0`, so the test encodes the bug instead of catching it.
+
+#### Failure 17: `flag_invalid` Raised for Quiet-NaN Inputs (open)
+- All four units set `flag_invalid` for any NaN operand. IEEE 754 signals invalid only for signaling NaNs and invalid operations (∞−∞, 0·∞, 0/0, ∞/∞).
+
+#### Failure 18: Converters Truncate Instead of Rounding (open)
+- `input_convertor`: `0x7FFFFFFF` → `0x4EFFFFFF` (RNE gives `0x4F000000`). Integers wider than 24 bits are truncated.
+- `output_convertor`:
+  - truncates toward zero (2.7 → 2);
+  - saturates negative overflow to `0x80000001` instead of INT_MIN;
+  - flags the exactly representable −2³¹ as overflow.
+- Neither converter is instantiated in `FPU_top`. The earlier docs described them as "integrated".
+
+#### Failure 19: Divider Not Actually Pipelined → Whole FPU Runs at ~10 MHz
+- **Root cause:** all 26 restoring-division iterations are a `for` loop in one `always @(*)` block in Stage 2. This is a single ~243-cell-deep combinational chain (~99.7 ns in Sky130).
+- **Full-FPU f<sub>max</sub>** (OpenSTA binary search on the `FPU_top` netlist):
+  - repo STA script: **100.506 ns → 9.95 MHz**;
+  - `timing.sdc` constraints: 105.789 ns → 9.45 MHz.
+- The MAC (~34 MHz) is the next bottleneck.
+
+#### Failure 20: Verification Tiers Weaker Than Reported
+
+| Tier | Earlier claim | Actual behaviour |
+|---|---|---|
+| CRV (1,000) | "Constrained random, 100% pass" | **No golden model.** It only checks X/Z bits, MUL/DIV sign parity and `flag_zero` consistency. It uses `$urandom` with exponents 120–134, not the SV constraint solver. |
+| Large cases (2,800) | "Algebraic invariance incl. commutativity" | Identity laws only (X+0, X+(−X), X·1, X·0, X/1, FMA identities). There is **no commutativity test**, and zero-operand cases go through the special-case bypass. |
+| SVA (47) | "Formal assertions" | **48** assertions, evaluated **only in simulation** over ~10 directed vectors per unit. No `.sby` / SymbiYosys or other formal tool exists in the repo. |
+| cocotb (4,052) | "Bit-exact, FTZ golden model" | Python double rounded to float32. It accepts **±1 ULP**, accepts any zero for an expected zero, checks only zero/nan/inf flags, uses a fixed seed and narrow exponents, and issues one op every ~5 cycles. `fpu_reference.py` is unused. |
+
+#### Failure 21: Incorrect Numbers in Earlier Reports (corrected in commit `eea1cf3`)
+
+| Item | Earlier value | Measured / correct value |
+|---|---|---|
+| `FPU_multiplier` timing @ 10 ns | +0.48 ns, MET, 105.1 MHz, 3,467 cells | **−0.3767 ns, VIOLATED, ~96 MHz, 3,291 cells** (the committed report always said this) |
+| Gate-equivalent factor | 3.31 µm² | **3.7536 µm²** (`nand2_1` in `sky130.lib`). All GE counts were ~13% high; `FPU_top` ≈ 48,570 GE, not 55,084 |
+| Cross-node die-area estimates (65nm / 28nm) | 0.079 / 0.015 mm² | Removed (based on the wrong GE factor) |
+| Divider / top power | Reported as valid dynamic power | **Invalid.** ~2.9×10⁵ W from default activity with 0 internal power |
+| Divider logic depth | ~487 logic levels | ~243 cells on the critical path |
+| FPGA utilization | Hand estimates, 0 flip-flops, `FPU_top` ~2,200 LUTs, "> 250 MHz" | Yosys `synth_xilinx`: **5,945 LUTs, 1,196 FFs, 4 DSP48E1**; no FPGA timing measured |
+| `fpu_top.txt` total vectors | 10,204 | **8,160** (excluding SVA) |
+| Corner-case section breakdowns | Included a "Subnormals & FTZ" section | Replaced with the sections the testbenches actually run (Zeros, Infinity, NaN, Flags, Output targets, Random) |
+| Implementation structure | "27-bit CLA", "carry-save array", "LZD tree" | Behavioural `+`, `*` and priority loops; structure chosen by Yosys/ABC |
+
+#### Failure 22: `timing.sdc` Is Not OpenSTA-Compatible
+- `timing.sdc` uses the Synopsys-only command `remove_from_collection`, which OpenSTA rejects, so its input-delay and driving-cell constraints fail when sourced.
+- The per-unit STA scripts never load `timing.sdc`. The reported timing therefore uses 0 ns I/O delay and no clock uncertainty or derating.
+- **Fix:** use `delete_from_list`, and source the SDC from the STA scripts.
+
+### 9.4 Status After the Second Pass
+
+- **Documentation corrected** (commit `eea1cf3`): `README.md`, `analysis/asic/asic_analysis.md`, `analysis/FPGA/fpga_analysis.md`, `analysis/test/*.txt` and all `documantation/*.md` now describe measured behaviour. `diagram/system_architecture.md` was redrawn to match the RTL stage mapping and marks the deviation points.
+- **Sections 4 and 8 of this history are superseded** where they conflict with Section 9. In particular, the 100% pass rates in Section 4 are real, but they do not imply IEEE 754 correctness, and the Section 8 multiplier timing, GE counts, die-area and power figures are corrected in Failure 21.
+- **RTL is unchanged.** Failures 13, 15, 16, 17, 18, 19 and 22 are open.
+
+**Recommended fix order:**
+1. Widen the FMA shift computation (Failure 13).
+2. Normalize subnormal inputs and implement gradual underflow (Failures 14, 15).
+3. Fix the zero-sign and NaN-flag rules, and correct test #14 (Failures 16, 17).
+4. Pipeline the divider (Failure 19).
+5. Add a bit-exact golden model to CRV and cocotb and remove the ±1 ULP tolerance (Failure 20).
+6. Fix `timing.sdc` (Failure 22).
